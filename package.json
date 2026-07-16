@@ -1,0 +1,30 @@
+{
+  "name": "nails-ai-backend",
+  "version": "2.0.0",
+  "description": "Production-Ready Grounded AI Knowledge System & Backend for Nails by Divya",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "build-knowledge": "node scripts/buildKnowledge.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "ai",
+    "gemini",
+    "customer-support",
+    "nails-by-divya",
+    "knowledge-pipeline"
+  ],
+  "author": "Nails by Divya Team",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@google/genai": "^2.11.0",
+    "@google/generative-ai": "^0.24.1",
+    "cheerio": "^1.0.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1"
+  }
+}
