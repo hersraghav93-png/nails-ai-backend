@@ -94,34 +94,194 @@ function extractHtmlKnowledge(htmlFilePath, pricingRegistry = {}) {
     else if (secId === "reviews" || secClass.includes("reviews")) category = "Client Reviews & Testimonials";
     else if (secId === "contact" || secClass.includes("contact")) category = "Contact Information & Studio Hours";
 
-    // If this is the Shop section (`#shop`), specifically extract each product card cleanly
+    // 1. DIWALI OFFERS SECTION (`#diwali-offers`)
+    if (secId === "diwali-offers" || secClass.includes("diwali-offers")) {
+      const diwaliHeading = cleanText($sec.find(".section-heading h2").text()) || "Festive offers, made for your plans.";
+      const diwaliSubtext = cleanText($sec.find(".section-subtext").text()) || "Choose your way to get festive-ready — at home across Delhi NCR or with handmade press-ons delivered across India.";
+
+      sections.push({
+        id: `${fileName}#diwali-offers-overview`,
+        page: fileName,
+        section: "diwali-promotions",
+        title: "The Diwali Nail Edit: Active Festive Offers Overview",
+        category: "Promotions & Festive Offers (Diwali Edit)",
+        content: `The Diwali Nail Edit — Active Festive Offers Overview:
+${diwaliHeading}
+${diwaliSubtext}
+
+Confirmed Active Diwali Offers:
+1. Home Service from ₹999 (Delhi NCR: Delhi, Gurgaon, Noida)
+2. Press-on Nails from ₹599 (Pan-India delivery across India)
+3. Buy 2 Press-On Sets, Get 1 Set FREE (3rd set is complimentary ❤️)
+4. First Order: 10% OFF (welcome discount for first-time clients)
+5. Returning Clients: 15% OFF (festive thank-you for returning clients)
+6. Same-Day Delivery available in Delhi NCR (Pan-India delivery for outside Delhi NCR)
+
+Important Terms Note: All 6 offers are confirmed active as displayed on the website. Expiry dates, discount stacking/combination rules, and same-day delivery cut-off times are unspecified on the website. Customers should message Divya on WhatsApp to confirm details or place an order.`,
+        keywords: extractKeywords("diwali", "festive", "offers", "promotions", "discounts", "home service", "press-on", "free", "same-day delivery")
+      });
+
+      $sec.find(".diwali-offer-card").each((oIdx, cardEl) => {
+        const $c = $(cardEl);
+        const cardTitle = cleanText($c.find("h3, h4, .diwali-card-title").text());
+        const cardSubtext = cleanText($c.find(".diwali-card-subtext, p").not(".diwali-card-tag, h3, h4").text());
+        const badge = cleanText($c.find(".badge, .diwali-card-tag, .free-lead, .badge-free").text());
+        const href = $c.attr("href") || "";
+
+        let offerSlug = `offer-${oIdx + 1}`;
+        let offerType = "General Festive Promotion";
+        let regularVsPromo = "";
+        let conditions = "Confirmed active Diwali offer on website. Expiry date is unspecified. Stacking with other discounts is unspecified.";
+
+        if (cardTitle.includes("Home Service")) {
+          offerSlug = "home-service-999";
+          offerType = "Home Service (At-Home Appointments in Delhi NCR)";
+          regularVsPromo = "Promotional price starts at ₹999 for at-home appointments in Delhi, Gurgaon, and Noida. Regular pricing varies depending on the specific nail service or extension set selected.";
+        } else if (cardTitle.includes("Press-on") && cardTitle.includes("599")) {
+          offerSlug = "press-on-from-599";
+          offerType = "Handmade Press-On Nails (Pan-India Delivery)";
+          regularVsPromo = "Promotional starting rate is ₹599. Regular catalog press-on nail sets range from ₹699 to ₹1399.";
+        } else if (cardTitle.includes("Buy 2")) {
+          offerSlug = "buy-2-get-1-free";
+          offerType = "Press-On Nail Bundle (Buy 2 Get 1 Free)";
+          regularVsPromo = "When you order 2 press-on sets, your 3rd set is complimentary (FREE). Regular catalog sets range from ₹699 to ₹1399 each.";
+        } else if (cardTitle.includes("First Order")) {
+          offerSlug = "first-order-10-off";
+          offerType = "New Customer Welcome Discount";
+          regularVsPromo = "10% discount off your first order. Regular prices apply before discount.";
+          conditions += " Applies to new customers placing their first Nails by Divya order.";
+        } else if (cardTitle.includes("Returning Clients")) {
+          offerSlug = "returning-clients-15-off";
+          offerType = "Returning Client Loyalty Discount";
+          regularVsPromo = "15% discount off your order or appointment. Regular prices apply before discount.";
+          conditions += " Applies to returning clients coming back for their next set or appointment.";
+        } else if (cardTitle.includes("Same-Day Delivery")) {
+          offerSlug = "same-day-delivery-delhi-ncr";
+          offerType = "Express Delivery Service";
+          regularVsPromo = "Same-day delivery is available strictly in Delhi NCR. Outside Delhi NCR, standard Pan-India delivery applies.";
+          conditions += " Delivery cut-off times and specific expedited fees are unspecified on the website; confirm via WhatsApp.";
+        }
+
+        const content = `Offer: ${cardTitle}
+Offer Type: ${offerType}
+Active Status: Confirmed Active (Diwali Promotion)
+Website Description: ${cardSubtext}${badge ? ` [Special Badge: ${badge}]` : ""}
+Regular vs Promotional Pricing: ${regularVsPromo}
+Terms & Eligibility: ${conditions}
+Booking / WhatsApp Link: ${href}`;
+
+        sections.push({
+          id: `${fileName}#diwali-${offerSlug}`,
+          page: fileName,
+          section: "diwali-promotions",
+          offerTitle: cardTitle,
+          offerType: offerType,
+          title: `Diwali Offer: ${cardTitle}`,
+          category: "Promotions & Festive Offers (Diwali Edit)",
+          content,
+          keywords: extractKeywords(cardTitle, cardSubtext, badge, offerType, "diwali", "festive", "promotion", "discount", "offer")
+        });
+      });
+      return;
+    }
+
+    // 2. PORTFOLIO SECTION (`#portfolio`)
+    if (secId === "portfolio" || secClass.includes("portfolio")) {
+      const portHeading = cleanText($sec.find("h2").text()) || "Portfolio & Recent Artistry Lookbook";
+      const portIntro = cleanText($sec.find(".section-intro, .portfolio-subtitle, p").first().text()) || "Explore 60 bespoke handcrafted nail designs by Divya across 3D chrome, minimalist nude, bridal elegance, and creative nail art.";
+
+      sections.push({
+        id: `${fileName}#portfolio-overview`,
+        page: fileName,
+        section: "portfolio-overview",
+        title: portHeading,
+        category: "Portfolio Designs & Nail Art Lookbook",
+        content: `Nails by Divya Portfolio & Lookbook Overview:\n${portHeading}\n${portIntro}\nBrowse 60 bespoke designs available as custom handmade press-ons delivered across India, or as reference styles for at-home appointments in Delhi NCR. Every design is fully customizable in length, shape, and finish.`,
+        keywords: extractKeywords(portHeading, portIntro, "portfolio", "lookbook", "designs", "categories", "nail art")
+      });
+
+      $sec.find(".portfolio-card").each((pIdx, cardEl) => {
+        const $card = $(cardEl);
+        const cat = $card.attr("data-category") || "art";
+        const imgEl = $card.find("img");
+        const imgAlt = cleanText(imgEl.attr("alt") || "");
+        const captionSpan = cleanText($card.find("figcaption span").not(".portfolio-zoom-hint").first().text());
+        const title = captionSpan || imgAlt || `Design #${pIdx + 1}`;
+        const imgSrc = imgEl.attr("src") || "";
+        const designNum = pIdx + 1;
+
+        const categoryLabels = {
+          chrome: "3D Chrome & Metallic Accents",
+          nude: "Minimalist Nude, Sheer & Natural Overlays",
+          bridal: "Bridal, Wedding & Festive Elegance",
+          art: "Creative Hand-Painted Nail Art & Patterns"
+        };
+        const catLabel = categoryLabels[cat] || cat;
+
+        const content = `Design Name: ${title}
+Design Number: #${designNum} of 60
+Category: ${catLabel} (${cat})
+Craftsmanship: Bespoke hand-crafted design by Divya. Available as custom handmade press-on nails delivered across India or as an in-person at-home appointment across Delhi NCR (Delhi, Gurgaon, Noida).
+Portfolio Image: ${imgSrc}
+Customization & Booking: Each design can be customized in length, shape, finish, and detail. Book via WhatsApp by sharing the design name or reference image.`;
+
+        sections.push({
+          id: `${fileName}#portfolio-${designNum}`,
+          page: fileName,
+          section: "portfolio-design",
+          designNumber: designNum,
+          designName: title,
+          portfolioCategory: cat,
+          title: `Portfolio Design #${designNum}: ${title}`,
+          category: "Portfolio Designs & Nail Art Lookbook",
+          content,
+          keywords: extractKeywords(title, cat, catLabel, "portfolio", "lookbook", "design", "reference", "nail art", "inspiration")
+        });
+      });
+      return;
+    }
+
+    // 3. SHOP PRODUCTS SECTION (`#shop`)
     if (secId === "shop" || secClass.includes("shop")) {
+      const seenSkus = new Set();
       $sec.find(".carousel-card, article[data-product-sku]").each((_, cardEl) => {
         const $card = $(cardEl);
         const sku = $card.attr("data-product-sku") || "";
-        const title = cleanText($card.find("h4").text()) || "Press-On Nail Set";
+        const title = cleanText($card.find("h4, h3, .product-title").first().text());
         const desc = cleanText($card.find("p").not(".product-price, .product-meta").last().text());
-        const price = pricingRegistry[sku] || cleanText($card.find(".product-price").text()) || "Chat with the Artist for exact pricing";
+        const regularPrice = pricingRegistry[sku] || cleanText($card.find(".product-price").first().text()) || "Contact for pricing";
 
-        if (title && sku) {
+        if (title && sku && !seenSkus.has(sku)) {
+          seenSkus.add(sku);
           const aliases = generateProductAliases(title, desc, sku);
-          const content = `Product Name: ${title}\nPrice: ${price}\nDescription: ${desc}\nCustomization: Handmade fresh to order with 100% tailored fit. Length, shape, and design can be customized upon confirmed order.\nInternal SKU: ${sku} (NOTE: For internal lookup only. Never mention SKU "${sku}" to the customer unless they explicitly typed it first.)`;
+          const content = `Product Name: ${title}
+Regular Catalog Price: ${regularPrice}
+Category: Handmade Press-On Nails
+Description: ${desc}
+Craftsmanship: Custom hand-crafted with salon-grade soft gel, tailored to your exact nail sizing.
+Active Festive Offers Context: Eligible for active Diwali promotions (e.g. Buy 2 Get 1 Free, First Order 10% off, Returning Clients 15% off). Regular catalog price is ${regularPrice}. Promotional discounts apply upon order confirmation on WhatsApp.
+Customization: Length, shape (Almond, Coffin, Square, Oval, Stiletto), and design details can be tailored upon order.
+Pan-India Delivery: Shipped across India. Same-day delivery available in Delhi NCR.
+Internal SKU: ${sku} (NOTE: For internal lookup only. Never mention SKU "${sku}" to the customer unless they explicitly typed it first.)`;
+
           sections.push({
             id: `${fileName}#shop-${sku}`,
             page: fileName,
             section: "shop-products",
-            title: `${title} - ${price}`,
+            title: `${title} - ${regularPrice}`,
             productName: title,
             sku: sku,
-            price: price,
+            price: regularPrice,
+            regularPrice: regularPrice,
             aliases: aliases,
             category: "Products & Press-On Pricing",
             content,
-            keywords: extractKeywords(title, desc, price, "press-on", "order", "whatsapp", ...aliases)
+            keywords: extractKeywords(title, desc, regularPrice, sku, "press-on", "regular price", "order", "whatsapp", ...aliases)
           });
         }
       });
-      // Also extract the shop header overview
+
+      // Shop header overview
       const shopHeading = cleanText($sec.find("h2").text()) || "Handmade Press-On Nail Collections";
       const shopIntro = cleanText($sec.find(".section-intro, .shop-subtitle").text()) || "Explore our casual, party, wedding, and daily wear press-on collections delivered across India.";
       sections.push({
@@ -130,8 +290,8 @@ function extractHtmlKnowledge(htmlFilePath, pricingRegistry = {}) {
         section: "shop-overview",
         title: shopHeading,
         category: "Products & Press-On Pricing",
-        content: `Nails by Divya Press-On Collections: ${shopIntro}\nEvery set is custom hand-painted after your order is confirmed using professional soft gel. Order directly via WhatsApp.`,
-        keywords: extractKeywords(shopHeading, shopIntro, "collection", "pricing", "press-on")
+        content: `Nails by Divya Press-On Collections: ${shopIntro}\nEvery set is custom hand-painted after your order is confirmed using professional soft gel. Regular prices range from ₹699 to ₹1399 across 22 catalog designs. Active Diwali offers include Press-on Nails starting from ₹599 and Buy 2 Get 1 Free. Order directly via WhatsApp.`,
+        keywords: extractKeywords(shopHeading, shopIntro, "collection", "pricing", "press-on", "regular price")
       });
       return; // Handled `#shop` via detailed product extraction
     }
@@ -205,10 +365,14 @@ function extractHtmlKnowledge(htmlFilePath, pricingRegistry = {}) {
     }
 
     // Default extraction for general sections (`#home`, `#about`, `#services`, `#contact`, etc.)
+    if (fileName === "nail-art.html") category = "Custom Nail Art & Studio Direction";
+    else if (fileName === "nail-extensions.html") category = "Nail Extensions & Overlay Services";
+    else if (fileName === "press-on-nails-india.html") category = "Handmade Press-On Nails India";
+
     const heading = cleanText($sec.find("h1, h2, h3").first().text()) || `Section: ${category}`;
-    // Clone section, remove inner cards/FAQs that might have been processed or would clutter
+    // Clone section, remove inner cards/FAQs/grids that might have been processed or would clutter
     const $clone = $sec.clone();
-    $clone.find("button, .faq-list, .carousel-track").remove();
+    $clone.find("button, .faq-list, .carousel-track, .diwali-offer-grid, .portfolio-grid").remove();
     const bodyText = cleanText($clone.text());
 
     if (bodyText.length > 30) {

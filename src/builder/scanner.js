@@ -19,9 +19,12 @@ const path = require("path");
 function scanDirectoryRecursively(dirPath, extensions = [".html", ".js"], ignoreDirs = ["node_modules", ".git", "assets", "dist", "build"]) {
   let results = [];
 
+  if (!dirPath || typeof dirPath !== "string") {
+    throw new Error("[Scanner Error] A valid directory path string is required.");
+  }
+
   if (!fs.existsSync(dirPath)) {
-    console.warn(`[Scanner Warning] Target directory not found: ${dirPath}`);
-    return results;
+    throw new Error(`[Scanner Error] Target directory does not exist: "${dirPath}". Please configure a valid FRONTEND_PATH.`);
   }
 
   const list = fs.readdirSync(dirPath);
@@ -47,13 +50,27 @@ function scanDirectoryRecursively(dirPath, extensions = [".html", ".js"], ignore
 
 /**
  * Discovers all frontend HTML and JS files in the configured frontend path.
+ * Validates that the primary entrypoint `index.html` is present.
  * @param {string} frontendRoot - Absolute path to the frontend root directory
  * @returns {{ htmlFiles: string[], jsFiles: string[] }}
  */
 function discoverFrontendFiles(frontendRoot) {
+  if (!frontendRoot || typeof frontendRoot !== "string") {
+    throw new Error("[Scanner Error] A valid frontendRoot string path is required.");
+  }
+
+  if (!fs.existsSync(frontendRoot)) {
+    throw new Error(`[Scanner Error] Target frontend directory does not exist: "${frontendRoot}". Please configure a valid FRONTEND_PATH.`);
+  }
+
   const allFiles = scanDirectoryRecursively(frontendRoot, [".html", ".js"]);
   const htmlFiles = allFiles.filter((f) => f.endsWith(".html"));
   const jsFiles = allFiles.filter((f) => f.endsWith(".js"));
+
+  const hasIndexHtml = htmlFiles.some((f) => path.basename(f).toLowerCase() === "index.html");
+  if (!hasIndexHtml) {
+    throw new Error(`[Scanner Error] Primary entrypoint "index.html" was not found in "${frontendRoot}". Aborting scan.`);
+  }
 
   return { htmlFiles, jsFiles };
 }

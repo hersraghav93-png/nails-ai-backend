@@ -195,6 +195,9 @@ function generateProductAliases(title, desc, sku = "") {
   if (tLower.includes("midnight chrome")) {
     aliases.add("black chrome"); aliases.add("dark chrome"); aliases.add("mirror black"); aliases.add("obsidian nails"); aliases.add("black metallic"); aliases.add("emerald chrome"); aliases.add("sapphire chrome"); aliases.add("shiny black nails"); aliases.add("black mirror nails");
   }
+  if (tLower.includes("leopard") || combined.includes("leopard")) {
+    aliases.add("leopard french"); aliases.add("leopard print"); aliases.add("animal print"); aliases.add("leopard tips"); aliases.add("leopard print nails"); aliases.add("cheetah nails"); aliases.add("leopard french tips");
+  }
 
   return Array.from(aliases).filter(a => a.length > 2);
 }
@@ -215,6 +218,7 @@ function scoreSectionRelevance(section, query) {
   const pNameNorm = (section.productName || "").toLowerCase();
   const skuNorm = (section.sku || "").toLowerCase();
   const aliases = Array.isArray(section.aliases) ? section.aliases : [];
+  const dNameNorm = (section.designName || "").toLowerCase();
 
   let score = 0;
 
@@ -228,6 +232,50 @@ function scoreSectionRelevance(section, query) {
     score += 45.0;
   } else if (titleNorm && qNorm.includes(titleNorm)) {
     score += 25.0;
+  }
+
+  // Exact or strong match on Portfolio Design Name
+  if (dNameNorm && (qNorm.includes(dNameNorm) || dNameNorm === qNorm)) {
+    score += 48.0;
+  }
+
+  // Active Diwali Promotions matching
+  if (section.section === "diwali-promotions") {
+    if (/\b(diwali|festive|festival|offer|offers|discount|discounts|promo|promotion|promotions|deal|deals)\b/i.test(qNorm)) {
+      score += 40.0;
+    }
+    if (/\b(combine|stack|stacking|two discounts|both offers)\b/i.test(qNorm)) {
+      score += 35.0;
+    }
+    if (/\b(same[- ]?day|delivery|shipping|pan[- ]?india|courier)\b/i.test(qNorm)) {
+      score += 35.0;
+    }
+    if (/\b(buy 2|get 1|free set|complimentary)\b/i.test(qNorm) && titleNorm.includes("buy 2")) {
+      score += 50.0;
+    }
+    if (/\b(first order|new customer|welcome)\b/i.test(qNorm) && titleNorm.includes("first order")) {
+      score += 50.0;
+    }
+    if (/\b(returning|loyalty|second order|again)\b/i.test(qNorm) && titleNorm.includes("returning")) {
+      score += 50.0;
+    }
+    if (/\b(home service|at home|appointment|appointments|doorstep|999)\b/i.test(qNorm) && (titleNorm.includes("home service") || contentNorm.includes("home service"))) {
+      score += 45.0;
+    }
+  }
+
+  // Regular price queries
+  if (/\b(regular price|price of|how much|cost of|catalog price)\b/i.test(qNorm)) {
+    if (section.section === "shop-products" || section.section === "shop-overview") {
+      score += 20.0;
+    }
+  }
+
+  // General design lookbook queries
+  if (/\b(designs?|lookbook|portfolio|art|styles?)\b/i.test(qNorm)) {
+    if (section.section === "portfolio-overview" || section.section === "portfolio-design") {
+      score += 22.0;
+    }
   }
 
   // PRIORITY 3: Alias match (Exact or fuzzy match against section.aliases)
