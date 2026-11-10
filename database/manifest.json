@@ -1,0 +1,121 @@
+{
+  "project": "Nails by Divya",
+  "phase": "Phase 1A.3 - Foundation Finalization",
+  "version": "1.2.0",
+  "target_engine": "PostgreSQL 15+",
+  "status": "FINAL_VERIFIED_FOUNDATION",
+  "created_at": "2026-11-11T00:07:00Z",
+  "git_branch": "feature/phase-1a-database-foundation",
+  "migrations": [
+    {
+      "id": "001",
+      "name": "001_initial_schema",
+      "up_file": "migrations/001_initial_schema.sql",
+      "down_file": "migrations/001_initial_schema_rollback.sql",
+      "sha256": "D8ACF3126BF51E1887B370ADF5C8C0CEB983E797073F4CFEDDFCA05387D7FEFE",
+      "down_sha256": "5CFD1C4676D0FB35074E31F5BB5C2B7DA33A945CB69333D1A02D6DCAFF269A6C",
+      "table_count": 50,
+      "description": "Core schema: users, roles, auth, profiles, catalog, services, portfolio, bookings, orders, order items, order claim attempts, payments, refunds, action tokens, discount rules, loyalty, consents, faqs, notifications, audit logs, settings"
+    }
+  ],
+  "seeds": [
+    {
+      "id": "001",
+      "name": "001_roles_and_categories",
+      "file": "seeds/001_roles_and_categories.sql",
+      "sha256": "14EEDCF1C1234E6CA088AD7C62B740306DDF15ACFD5006228C163DF079A6BE8C",
+      "description": "Default RBAC roles (4), fine-grained permissions (15), role mappings, product categories (4), portfolio categories (4), salon services (5), add-ons (3 unset prices), Delhi NCR manual review fallback (unverified PIN codes removed)"
+    },
+    {
+      "id": "002",
+      "name": "002_catalog_products",
+      "file": "seeds/002_catalog_products.sql",
+      "sha256": "DB826AB68226E6C9B5CBC7C5440114C5EECED474C4D8E3571EF36A6B0C30D04B",
+      "description": "22 verified press-on nail sets with prices (₹699 - ₹1399), SKUs, descriptions, and media assets (idempotent ON CONFLICT)"
+    },
+    {
+      "id": "003",
+      "name": "003_portfolio_lookbook",
+      "file": "seeds/003_portfolio_lookbook.sql",
+      "sha256": "5CE75B62A82FA9F448DA089D478FBE9C0D262DA343C0A2EEE5A826F81CFE302D",
+      "description": "60 portfolio designs (1 to 60); Design #32 quarantined pending artist confirmation of missing nvm9.png"
+    },
+    {
+      "id": "004",
+      "name": "004_faqs",
+      "file": "seeds/004_faqs.sql",
+      "sha256": "BC8A0401FE5EBD8A8CF44DA1F7D2763BF6A93AFB6EAF9B4F430681CD47ADC90F",
+      "description": "31 verified customer FAQs (19 from index.html #trust + 12 across 3 SEO landing pages)"
+    },
+    {
+      "id": "005",
+      "name": "005_business_settings",
+      "file": "seeds/005_business_settings.sql",
+      "sha256": "8FF4296D2914B00315B1D3BC493EC615E3AC3C89D0816F5C1B79B043A5D71BE5",
+      "description": "Default operational settings: loyalty disabled, cryptographic claim secret hashing, freelance service area policy, token TTLs, DPDP retention"
+    }
+  ],
+  "execution_order": [
+    "migrations/001_initial_schema.sql",
+    "seeds/001_roles_and_categories.sql",
+    "seeds/002_catalog_products.sql",
+    "seeds/003_portfolio_lookbook.sql",
+    "seeds/004_faqs.sql",
+    "seeds/005_business_settings.sql"
+  ],
+  "rollback_order": [
+    "migrations/001_initial_schema_rollback.sql"
+  ],
+  "tables": [
+    {"name": "users", "domain": "Identity, Access & Profiles"},
+    {"name": "roles", "domain": "Identity, Access & Profiles"},
+    {"name": "permissions", "domain": "Identity, Access & Profiles"},
+    {"name": "role_permissions", "domain": "Identity, Access & Profiles"},
+    {"name": "user_roles", "domain": "Identity, Access & Profiles"},
+    {"name": "customer_profiles", "domain": "Identity, Access & Profiles"},
+    {"name": "admin_profiles", "domain": "Identity, Access & Profiles"},
+    {"name": "user_addresses", "domain": "Identity, Access & Profiles"},
+    {"name": "customer_consents", "domain": "Identity, Access & Profiles"},
+    {"name": "product_categories", "domain": "Catalog & Portfolio"},
+    {"name": "products", "domain": "Catalog & Portfolio"},
+    {"name": "product_images", "domain": "Catalog & Portfolio"},
+    {"name": "product_variants", "domain": "Catalog & Portfolio"},
+    {"name": "portfolio_categories", "domain": "Catalog & Portfolio"},
+    {"name": "portfolio_designs", "domain": "Catalog & Portfolio"},
+    {"name": "services", "domain": "At-Home Services"},
+    {"name": "service_addons", "domain": "At-Home Services"},
+    {"name": "service_areas", "domain": "At-Home Services"},
+    {"name": "faqs", "domain": "Knowledge Base & FAQs"},
+    {"name": "wishlists", "domain": "Customer Experience & Cart"},
+    {"name": "wishlist_items", "domain": "Customer Experience & Cart"},
+    {"name": "carts", "domain": "Customer Experience & Cart"},
+    {"name": "cart_items", "domain": "Customer Experience & Cart"},
+    {"name": "discount_codes", "domain": "Discounts & Promotions"},
+    {"name": "discount_code_products", "domain": "Discounts & Promotions"},
+    {"name": "discount_code_categories", "domain": "Discounts & Promotions"},
+    {"name": "discount_code_services", "domain": "Discounts & Promotions"},
+    {"name": "orders", "domain": "Ecommerce Orders & Shipping"},
+    {"name": "order_items", "domain": "Ecommerce Orders & Shipping"},
+    {"name": "order_status_history", "domain": "Ecommerce Orders & Shipping"},
+    {"name": "discount_redemptions", "domain": "Discounts & Promotions"},
+    {"name": "shipments", "domain": "Ecommerce Orders & Shipping"},
+    {"name": "order_claim_attempts", "domain": "Ecommerce Orders & Identity Security"},
+    {"name": "bookings", "domain": "At-Home Bookings"},
+    {"name": "booking_status_history", "domain": "At-Home Bookings"},
+    {"name": "booking_action_tokens", "domain": "At-Home Bookings"},
+    {"name": "custom_design_requests", "domain": "Custom Design Requests"},
+    {"name": "custom_request_images", "domain": "Custom Design Requests"},
+    {"name": "custom_quotes", "domain": "Custom Design Requests"},
+    {"name": "custom_quote_items", "domain": "Custom Design Requests"},
+    {"name": "payments", "domain": "Financials, Payments & Refunds"},
+    {"name": "payment_events", "domain": "Financials, Payments & Refunds"},
+    {"name": "refunds", "domain": "Financials, Payments & Refunds"},
+    {"name": "refund_events", "domain": "Financials, Payments & Refunds"},
+    {"name": "loyalty_accounts", "domain": "Loyalty Program"},
+    {"name": "loyalty_transactions", "domain": "Loyalty Program"},
+    {"name": "notification_jobs", "domain": "Notifications & Operations"},
+    {"name": "notification_delivery_logs", "domain": "Notifications & Operations"},
+    {"name": "audit_logs", "domain": "Notifications & Operations"},
+    {"name": "business_settings", "domain": "Business Configuration"}
+  ]
+}
