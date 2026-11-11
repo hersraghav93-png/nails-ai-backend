@@ -5,3 +5,4 @@ node_modules
 knowledge/backups/
 database/backups/*
 !database/backups/.gitkeep
+.neon
