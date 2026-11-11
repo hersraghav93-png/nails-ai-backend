@@ -7,7 +7,10 @@
     "start": "node index.js",
     "dev": "node --watch index.js",
     "build-knowledge": "node scripts/buildKnowledge.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "migrate": "node scripts/migrate.js --up",
+    "migrate:status": "node scripts/migrate.js --status",
+    "verify:staging": "node scripts/verifyStagingIntegration.js",
+    "test": "node scripts/testBackend.js"
   },
   "keywords": [
     "ai",
@@ -25,6 +28,7 @@
     "cheerio": "^1.0.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "pg": "^8.23.1"
   }
 }

@@ -251,10 +251,25 @@ ${selectedKnowledgeXml}
   }
 }
 
+/**
+ * Returns read-only operational telemetry for health check diagnostics.
+ */
+function getKnowledgeStatus() {
+  return {
+    isLoaded: Boolean(knowledgeCache),
+    version: knowledgeCache && knowledgeCache.metadata ? knowledgeCache.metadata.version : null,
+    sectionsCount: knowledgeCache && knowledgeCache.sections ? knowledgeCache.sections.length : 0,
+    generatedAt: knowledgeCache && knowledgeCache.metadata ? knowledgeCache.metadata.generatedAt : null,
+    hasGeminiKey: Boolean(CONFIG.geminiApiKey),
+    model: CONFIG.geminiModel,
+  };
+}
+
 module.exports = {
   initAiService,
   loadKnowledgeDatabase,
   reloadKnowledge,
   retrieveRelevantContext,
-  generateChatReply
+  generateChatReply,
+  getKnowledgeStatus,
 };

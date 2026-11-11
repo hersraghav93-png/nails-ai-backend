@@ -1,28 +1,71 @@
 const express = require("express");
 const CONFIG = require("../config");
-const { generateChatReply, reloadKnowledge } = require("../services/aiService");
+const { generateChatReply, reloadKnowledge, getKnowledgeStatus } = require("../services/aiService");
 const { buildKnowledgeDatabase } = require("../builder/knowledgeBuilder");
+const { checkHealth } = require("../db/pool");
 
 /**
  * ==========================================================================
  * EXPRESS ROUTER (`src/routes/chatRoute.js`)
- * Manages API endpoints for chat interactions and dynamic knowledge rebuilds.
+ * Manages API endpoints for chat interactions, health monitoring, and
+ * dynamic knowledge rebuilds.
  * ==========================================================================
  */
 
 const router = express.Router();
 
 /**
- * GET /
- * Health check endpoint verifying server and AI readiness.
+ * Common handler for GET / and GET /health
+ * Returns comprehensive operational telemetry across database, knowledge, and AI.
  */
-router.get("/", (req, res) => {
-  res.json({
-    status: "healthy",
-    service: "Nails by Divya AI Knowledge Backend 🚀",
-    timestamp: new Date().toISOString()
-  });
-});
+async function handleHealthCheck(req, res) {
+  const dbHealth = await checkHealth();
+  const knowledgeStats = getKnowledgeStatus();
+
+  const isHealthy = dbHealth.status === "connected" && knowledgeStats.isLoaded;
+
+  const payload = {
+    status: isHealthy ? "healthy" : "degraded",
+    service: "Nails by Divya Platform Backend 🚀",
+    timestamp: new Date().toISOString(),
+    environment: CONFIG.nodeEnv,
+    database: {
+      status: dbHealth.status,
+      latencyMs: dbHealth.latencyMs,
+      pool: dbHealth.pool,
+      error: dbHealth.error,
+    },
+    knowledge: {
+      status: knowledgeStats.isLoaded ? "ready" : "unloaded",
+      version: knowledgeStats.version,
+      sectionsCount: knowledgeStats.sectionsCount,
+      generatedAt: knowledgeStats.generatedAt,
+    },
+    ai: {
+      status: knowledgeStats.hasGeminiKey ? "configured" : "missing_api_key",
+      model: knowledgeStats.model,
+    },
+  };
+
+  // If strict check requested via query (?strict=true) and unhealthy, return 503
+  if (req.query.strict === "true" && !isHealthy) {
+    return res.status(503).json(payload);
+  }
+
+  res.json(payload);
+}
+
+/**
+ * GET /
+ * Root health check endpoint verifying server, database, and AI readiness.
+ */
+router.get("/", handleHealthCheck);
+
+/**
+ * GET /health
+ * Dedicated health check endpoint with full subsystem status.
+ */
+router.get("/health", handleHealthCheck);
 
 /**
  * POST /chat

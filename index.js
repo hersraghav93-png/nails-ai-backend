@@ -11,6 +11,8 @@ const CONFIG = require("./src/config");
 const { initAiService } = require("./src/services/aiService");
 const chatRouter = require("./src/routes/chatRoute");
 
+const { closePool } = require("./src/db/pool");
+
 const app = express();
 
 // 1. Middleware
@@ -23,21 +25,40 @@ initAiService();
 // 3. Mount Application Routes
 app.use("/", chatRouter);
 
-// 4. Start Server
-const server = app.listen(CONFIG.port, () => {
-  console.log(`\n🚀 [Nails by Divya AI Server] Running on http://localhost:${CONFIG.port}`);
-  console.log(`🔗 [API Endpoints]:`);
-  console.log(`   • GET  /                 -> Health Check`);
-  console.log(`   • POST /chat             -> Grounded AI Customer Support`);
-  console.log(`   • POST /rebuild-knowledge-> Dynamic Website Re-Scan & Re-Index\n`);
-});
+// 4. Start Server (if executed directly)
+let server;
+if (require.main === module) {
+  server = app.listen(CONFIG.port, () => {
+    console.log(`\n🚀 [Nails by Divya Server] Running on http://localhost:${CONFIG.port}`);
+    console.log(`🔗 [API Endpoints]:`);
+    console.log(`   • GET  /                 -> Health Check (Root)`);
+    console.log(`   • GET  /health           -> Detailed Subsystem Health`);
+    console.log(`   • POST /chat             -> Grounded AI Customer Support`);
+    console.log(`   • POST /rebuild-knowledge-> Dynamic Website Re-Scan & Re-Index\n`);
+  });
+}
 
 // Handle graceful shutdown
-process.on("SIGTERM", () => {
-  console.log("🛑 [Server] SIGTERM received. Shutting down gracefully...");
-  server.close(() => {
-    console.log("🏁 [Server] Process terminated.");
-  });
-});
+function gracefulShutdown(signal) {
+  console.log(`\n🛑 [Server] ${signal} received. Shutting down gracefully...`);
+  if (server) {
+    server.close(async () => {
+      try {
+        await closePool();
+        console.log("🔌 [Database] Connection pool closed successfully.");
+      } catch (err) {
+        console.error("⚠️  [Database Shutdown Error]:", err.message);
+      }
+      console.log("🏁 [Server] Process terminated.");
+    });
+  } else {
+    closePool().then(() => {
+      console.log("🏁 [Server] Process terminated.");
+    });
+  }
+}
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
 module.exports = app;
