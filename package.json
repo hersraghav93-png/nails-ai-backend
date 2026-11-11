@@ -11,6 +11,7 @@
     "migrate:status": "node scripts/migrate.js --status",
     "verify:staging": "node scripts/verifyStagingIntegration.js",
     "provision:admin": "node scripts/provisionAdmin.js",
+    "backup:staging": "node scripts/backupRecoveryStaging.js",
     "test:unit": "node scripts/testBackend.js",
     "test:auth": "node scripts/testAuth.js",
     "test:commerce": "node scripts/testCommerce.js",
@@ -20,7 +21,8 @@
     "test:security": "node scripts/testSecurityProductionReadiness.js",
     "test:communications": "node scripts/testCommunications.js",
     "test:storefront": "node scripts/testStorefrontCustomerJourneys.js",
-    "test": "node scripts/testBackend.js && node scripts/testAuth.js && node scripts/testCommerce.js && node scripts/testBookings.js && node scripts/testAdminOps.js && node scripts/testAuthIntegration.js && node scripts/testSecurityProductionReadiness.js && node scripts/testCommunications.js && node scripts/testStorefrontCustomerJourneys.js"
+    "test:staging": "node scripts/testStagingIntegration.js",
+    "test": "node scripts/testBackend.js && node scripts/testAuth.js && node scripts/testCommerce.js && node scripts/testBookings.js && node scripts/testAdminOps.js && node scripts/testAuthIntegration.js && node scripts/testSecurityProductionReadiness.js && node scripts/testCommunications.js && node scripts/testStorefrontCustomerJourneys.js && node scripts/testStagingIntegration.js"
   },
   "keywords": [
     "ai",

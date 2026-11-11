@@ -21,6 +21,7 @@ const ALLOWED_PROD_ORIGINS = [
 const ALLOWED_STAGING_ORIGINS = [
   "https://staging.nailsbydivya.store",
   "https://preview.nailsbydivya.store",
+  "https://staging-admin.nailsbydivya.store",
 ];
 
 // Authorized local development origins
@@ -79,8 +80,20 @@ function getCorsMiddleware() {
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "x-admin-key", "X-Cart-Session", "x-cart-session"],
-    exposedHeaders: ["X-Cart-Session", "x-cart-session"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "x-admin-key",
+      "X-Cart-Session",
+      "x-cart-session",
+      "X-Claim-Secret",
+      "x-claim-secret",
+      "X-Idempotency-Key",
+      "x-idempotency-key",
+      "X-Hub-Signature-256",
+      "x-hub-signature-256",
+    ],
+    exposedHeaders: ["X-Cart-Session", "x-cart-session", "X-Claim-Secret", "x-claim-secret"],
     maxAge: 86400, // 24 hours pre-flight caching
   });
 }

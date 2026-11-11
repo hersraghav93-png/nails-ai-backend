@@ -102,13 +102,18 @@ const CONFIG = {
           process.env.FIREBASE_SERVICE_ACCOUNT_PATH)
     ),
   },
-  // Customer Communications & WhatsApp Configuration (Phase 3A)
+  // Customer Communications & WhatsApp Configuration (Phase 3A & 4A)
   notifications: {
     whatsapp: {
       provider: process.env.WHATSAPP_PROVIDER || "meta",
+      apiVersion: process.env.WHATSAPP_GRAPH_API_VERSION || "v26.0",
       apiToken: process.env.WHATSAPP_API_TOKEN || "",
       phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || "",
       businessAccountId: process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || "",
+      appSecret: process.env.WHATSAPP_APP_SECRET || "",
+      webhookVerifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || "",
+      testRecipientPhone: process.env.WHATSAPP_TEST_RECIPIENT_PHONE || "",
+      isTestRecipientApproved: process.env.WHATSAPP_TEST_RECIPIENT_APPROVED === "true",
       isConfigured: Boolean(process.env.WHATSAPP_API_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID),
       studioPhoneNumber: process.env.STUDIO_WHATSAPP_PHONE || "+919811000001",
     },
@@ -120,5 +125,6 @@ console.log(`⚙️  [Config Verification] Active Gemini Model: "${CONFIG.gemini
 console.log(`⚙️  [Config Verification] Resolved Frontend Path: "${CONFIG.frontendPath}" (Exists: ${fs.existsSync(CONFIG.frontendPath)})`);
 console.log(`⚙️  [Config Verification] Database Target: ${CONFIG.database.host}:${CONFIG.database.port}/${CONFIG.database.database} (SSL: ${Boolean(CONFIG.database.ssl)}, Configured: ${CONFIG.database.isConfigured})`);
 console.log(`⚙️  [Config Verification] Firebase Auth Configured: ${CONFIG.firebase.isConfigured} (Project: "${CONFIG.firebase.projectId || 'none'}")`);
+console.log(`⚙️  [Config Verification] WhatsApp Cloud API: Configured=${CONFIG.notifications.whatsapp.isConfigured} (Graph API: "${CONFIG.notifications.whatsapp.apiVersion}")`);
 
 module.exports = CONFIG;

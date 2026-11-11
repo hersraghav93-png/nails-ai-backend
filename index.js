@@ -16,6 +16,7 @@ const cartRouter = require("./src/routes/cartRoute");
 const orderRouter = require("./src/routes/orderRoute");
 const bookingRouter = require("./src/routes/bookingRoute");
 const productRouter = require("./src/routes/productRoute");
+const webhookRouter = require("./src/routes/webhookRoute");
 
 const { closePool } = require("./src/db/pool");
 const { getCorsMiddleware } = require("./src/middleware/corsConfig");
@@ -25,7 +26,14 @@ const app = express();
 
 // 1. Middleware
 app.use(getCorsMiddleware());
-app.use(express.json({ limit: "2mb" }));
+app.use(
+  express.json({
+    limit: "2mb",
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 
 // 2. Initialize AI Service & In-Memory Knowledge Base
 initAiService();
@@ -39,6 +47,7 @@ app.use("/api/admin", adminRateLimiter, adminRouter);
 app.use("/api/cart", cartRouter);
 app.use("/api/orders", orderRouter);
 app.use("/api/products", productRouter);
+app.use("/api/webhooks", webhookRouter);
 app.use("/api", bookingRouter);
 
 // 4. Start Server (if executed directly)
