@@ -14,7 +14,8 @@
     "test:unit": "node scripts/testBackend.js",
     "test:auth": "node scripts/testAuth.js",
     "test:commerce": "node scripts/testCommerce.js",
-    "test": "node scripts/testBackend.js && node scripts/testAuth.js && node scripts/testCommerce.js"
+    "test:bookings": "node scripts/testBookings.js",
+    "test": "node scripts/testBackend.js && node scripts/testAuth.js && node scripts/testCommerce.js && node scripts/testBookings.js"
   },
   "keywords": [
     "ai",

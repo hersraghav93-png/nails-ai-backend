@@ -17,6 +17,15 @@ const {
   adminUpdateOrderStatus,
   getOrderById,
 } = require("../services/orderService");
+const {
+  adminListAppointments,
+  confirmAppointmentRequest,
+  proposeAlternativeSlot,
+  declineAppointmentRequest,
+  cancelAppointmentRequest,
+  updateAppointmentStatus,
+  getAppointmentById,
+} = require("../services/bookingService");
 
 const router = express.Router();
 
@@ -174,6 +183,218 @@ router.patch("/orders/:orderId/status", requirePermission("Update Order Fulfillm
     return res.status(status).json({
       error: err.message || "Failed to update order status.",
       code: err.code || "ADMIN_ORDER_UPDATE_FAILED",
+    });
+  }
+});
+
+// =============================================================================
+// ADMINISTRATIVE AT-HOME APPOINTMENTS (Delhi NCR)
+// =============================================================================
+
+/**
+ * GET /api/admin/bookings
+ * Requires 'View Bookings' permission.
+ * Lists appointment requests with status, date, service, and search filters.
+ */
+router.get("/bookings", requirePermission("View Bookings"), async (req, res) => {
+  try {
+    const result = await adminListAppointments({
+      status: req.query.status,
+      date: req.query.date,
+      serviceId: req.query.service_id,
+      search: req.query.search,
+      limit: req.query.limit,
+      offset: req.query.offset,
+    });
+
+    return res.json({
+      status: "success",
+      ...result,
+    });
+  } catch (err) {
+    const status = err.statusCode || 500;
+    return res.status(status).json({
+      error: err.message || "Failed to list appointment requests.",
+      code: "ADMIN_BOOKING_LIST_FAILED",
+    });
+  }
+});
+
+/**
+ * GET /api/admin/bookings/:bookingId
+ * Requires 'View Bookings' permission.
+ * Retrieves full appointment details, address, pricing, and complete status history.
+ */
+router.get("/bookings/:bookingId", requirePermission("View Bookings"), async (req, res) => {
+  try {
+    const details = await getAppointmentById(req.params.bookingId, {
+      isAdmin: true,
+      skipAuthCheck: true,
+    });
+
+    return res.json({
+      status: "success",
+      ...details,
+    });
+  } catch (err) {
+    const status = err.statusCode || 404;
+    return res.status(status).json({
+      error: err.message || "Appointment not found.",
+      code: err.code || "ADMIN_BOOKING_FETCH_FAILED",
+    });
+  }
+});
+
+/**
+ * PATCH /api/admin/bookings/:bookingId/confirm
+ * Requires 'Confirm or Decline Bookings' permission.
+ * Confirms an appointment request and locks in scheduled start and end times.
+ */
+router.patch("/bookings/:bookingId/confirm", requirePermission("Confirm or Decline Bookings"), async (req, res) => {
+  try {
+    const result = await confirmAppointmentRequest(
+      req.params.bookingId,
+      {
+        confirmedStartTime: req.body && req.body.confirmed_start_time,
+        confirmedEndTime: req.body && req.body.confirmed_end_time,
+        notes: req.body && req.body.notes,
+      },
+      req.user,
+      req.ip
+    );
+
+    return res.json({
+      status: "success",
+      message: "Appointment confirmed successfully.",
+      ...result,
+    });
+  } catch (err) {
+    const status = err.statusCode || 400;
+    return res.status(status).json({
+      error: err.message || "Failed to confirm appointment request.",
+      code: err.code || "ADMIN_CONFIRM_BOOKING_FAILED",
+    });
+  }
+});
+
+/**
+ * PATCH /api/admin/bookings/:bookingId/propose-slot
+ * Requires 'Confirm or Decline Bookings' permission.
+ * Proposes an alternative date & time window when the requested slot is unavailable.
+ */
+router.patch("/bookings/:bookingId/propose-slot", requirePermission("Confirm or Decline Bookings"), async (req, res) => {
+  try {
+    const result = await proposeAlternativeSlot(
+      req.params.bookingId,
+      {
+        alternativeDate: req.body && (req.body.alternative_date || req.body.alternative_proposed_date),
+        alternativeTimeSlot: req.body && (req.body.alternative_time_slot || req.body.alternative_proposed_time_slot),
+        rescheduleReason: req.body && req.body.reschedule_reason,
+        notes: req.body && req.body.notes,
+      },
+      req.user,
+      req.ip
+    );
+
+    return res.json({
+      status: "success",
+      message: "Alternative slot proposed to customer.",
+      ...result,
+    });
+  } catch (err) {
+    const status = err.statusCode || 400;
+    return res.status(status).json({
+      error: err.message || "Failed to propose alternative slot.",
+      code: err.code || "ADMIN_PROPOSE_SLOT_FAILED",
+    });
+  }
+});
+
+/**
+ * PATCH /api/admin/bookings/:bookingId/reject
+ * Requires 'Confirm or Decline Bookings' permission.
+ * Declines an appointment request with an explicit reason.
+ */
+router.patch("/bookings/:bookingId/reject", requirePermission("Confirm or Decline Bookings"), async (req, res) => {
+  try {
+    const result = await declineAppointmentRequest(
+      req.params.bookingId,
+      {
+        reason: req.body && (req.body.reason || req.body.decline_reason),
+        notes: req.body && req.body.notes,
+      },
+      req.user,
+      req.ip
+    );
+
+    return res.json({
+      status: "success",
+      message: "Appointment request declined.",
+      ...result,
+    });
+  } catch (err) {
+    const status = err.statusCode || 400;
+    return res.status(status).json({
+      error: err.message || "Failed to decline appointment request.",
+      code: err.code || "ADMIN_DECLINE_BOOKING_FAILED",
+    });
+  }
+});
+
+/**
+ * PATCH /api/admin/bookings/:bookingId/cancel
+ * Requires 'Confirm or Decline Bookings' permission.
+ * Cancels an appointment from the artist/studio side.
+ */
+router.patch("/bookings/:bookingId/cancel", requirePermission("Confirm or Decline Bookings"), async (req, res) => {
+  try {
+    const result = await cancelAppointmentRequest(req.params.bookingId, {
+      userId: req.user.id,
+      isAdmin: true,
+      reason: req.body && req.body.reason,
+    });
+
+    return res.json({
+      status: "success",
+      message: "Appointment cancelled by studio.",
+      ...result,
+    });
+  } catch (err) {
+    const status = err.statusCode || 400;
+    return res.status(status).json({
+      error: err.message || "Failed to cancel appointment.",
+      code: err.code || "ADMIN_CANCEL_BOOKING_FAILED",
+    });
+  }
+});
+
+/**
+ * PATCH /api/admin/bookings/:bookingId/status
+ * Requires 'Confirm or Decline Bookings' permission.
+ * Updates appointment operational progress (e.g. IN_PROGRESS, COMPLETED).
+ */
+router.patch("/bookings/:bookingId/status", requirePermission("Confirm or Decline Bookings"), async (req, res) => {
+  try {
+    const result = await updateAppointmentStatus(
+      req.params.bookingId,
+      {
+        status: req.body && (req.body.status || req.body.booking_status),
+        notes: req.body && req.body.notes,
+      },
+      req.user,
+      req.ip
+    );
+
+    return res.json({
+      status: "success",
+      message: "Appointment status updated.",
+      ...result,
+    });
+  } catch (err) {
+    const status = err.statusCode || 400;
+    return res.status(status).json({
+      error: err.message || "Failed to update appointment status.",
+      code: err.code || "ADMIN_UPDATE_STATUS_FAILED",
     });
   }
 });
