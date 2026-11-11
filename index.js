@@ -6,7 +6,6 @@
  */
 
 const express = require("express");
-const cors = require("cors");
 const CONFIG = require("./src/config");
 const { initAiService } = require("./src/services/aiService");
 const chatRouter = require("./src/routes/chatRoute");
@@ -18,21 +17,24 @@ const orderRouter = require("./src/routes/orderRoute");
 const bookingRouter = require("./src/routes/bookingRoute");
 
 const { closePool } = require("./src/db/pool");
+const { getCorsMiddleware } = require("./src/middleware/corsConfig");
+const { adminRateLimiter, authRateLimiter, chatRateLimiter } = require("./src/middleware/rateLimiter");
 
 const app = express();
 
 // 1. Middleware
-app.use(cors());
+app.use(getCorsMiddleware());
 app.use(express.json({ limit: "2mb" }));
 
 // 2. Initialize AI Service & In-Memory Knowledge Base
 initAiService();
 
 // 3. Mount Application Routes
+app.use("/chat", chatRateLimiter);
 app.use("/", chatRouter);
-app.use("/api/auth", authRouter);
+app.use("/api/auth", authRateLimiter, authRouter);
 app.use("/api/customer", customerRouter);
-app.use("/api/admin", adminRouter);
+app.use("/api/admin", adminRateLimiter, adminRouter);
 app.use("/api/cart", cartRouter);
 app.use("/api/orders", orderRouter);
 app.use("/api", bookingRouter);

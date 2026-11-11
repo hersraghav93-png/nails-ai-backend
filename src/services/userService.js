@@ -11,6 +11,7 @@
 
 const { query, withTransaction } = require("../db/pool");
 const { verifyFirebaseAdminUser } = require("./firebaseService");
+const CONFIG = require("../config");
 
 const ALLOWED_NAIL_SHAPES = [
   "Almond",
@@ -212,8 +213,8 @@ async function findOrCreateUserByFirebaseToken(decodedToken) {
     throw new Error("Failed to resolve or create user account.");
   }
 
-  // Development-only: auto-link simulator admin roles if in development mode
-  if (process.env.NODE_ENV === "development") {
+  // Development-only: auto-link simulator admin roles strictly in verified local development
+  if (CONFIG.isDevelopment() && !CONFIG.isLiveEnvironment()) {
     if (user.firebase_uid === "dev_super_raghav") {
       await query("INSERT INTO user_roles (user_id, role_id) VALUES ($1, 'super_operator') ON CONFLICT DO NOTHING;", [user.id]);
       await query("INSERT INTO admin_profiles (user_id, display_name, is_mfa_enabled) VALUES ($1, 'Raghav', TRUE) ON CONFLICT (user_id) DO UPDATE SET display_name = 'Raghav';", [user.id]);
@@ -707,10 +708,12 @@ async function provisionAdminAccount({
   const cleanPhone = phone.trim();
 
   // 1. Remote verification against Firebase Admin
-  // Strictly mandatory in production; permitted to skip only in development with explicit dev flag
+  // Strictly mandatory in production and staging; permitted to skip only in local dev/test with explicit dev flag
   if (devAllowUnverified) {
-    if (process.env.NODE_ENV !== "development" && process.env.NODE_ENV !== "test") {
-      throw new Error("devAllowUnverified is strictly forbidden outside development mode (NODE_ENV must be 'development' or 'test').");
+    if (CONFIG.isLiveEnvironment() || !CONFIG.isDevelopment()) {
+      if (!CONFIG.isTest()) {
+        throw new Error("devAllowUnverified is strictly forbidden outside development mode.");
+      }
     }
     console.warn(`⚠️  [DEV ONLY] Skipping remote Firebase Auth verification for "${cleanUid}" because devAllowUnverified=true in development/test mode.`);
   } else {

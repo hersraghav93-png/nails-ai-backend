@@ -17,7 +17,8 @@
     "test:bookings": "node scripts/testBookings.js",
     "test:admin": "node scripts/testAdminOps.js",
     "test:auth-integration": "node scripts/testAuthIntegration.js",
-    "test": "node scripts/testBackend.js && node scripts/testAuth.js && node scripts/testCommerce.js && node scripts/testBookings.js && node scripts/testAdminOps.js && node scripts/testAuthIntegration.js"
+    "test:security": "node scripts/testSecurityProductionReadiness.js",
+    "test": "node scripts/testBackend.js && node scripts/testAuth.js && node scripts/testCommerce.js && node scripts/testBookings.js && node scripts/testAdminOps.js && node scripts/testAuthIntegration.js && node scripts/testSecurityProductionReadiness.js"
   },
   "keywords": [
     "ai",

@@ -18,6 +18,7 @@
 
 const { provisionAdminAccount, VALID_ADMIN_ROLES } = require("../src/services/userService");
 const { closePool } = require("../src/db/pool");
+const CONFIG = require("../src/config");
 
 function printUsage() {
   console.log(`
@@ -80,8 +81,8 @@ async function main() {
     process.exit(1);
   }
 
-  if (args.devUnverified && process.env.NODE_ENV === "production") {
-    console.error("❌ Fatal Security Error: --dev-unverified is strictly forbidden in production mode!\n");
+  if (args.devUnverified && (CONFIG.isLiveEnvironment() || !CONFIG.isDevelopment())) {
+    console.error("❌ Fatal Security Error: --dev-unverified is strictly forbidden in production and staging environments!\n");
     process.exit(1);
   }
 

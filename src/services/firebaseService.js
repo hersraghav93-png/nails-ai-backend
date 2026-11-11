@@ -21,7 +21,7 @@ let testAdminUserLookup = null;
  * @returns {boolean}
  */
 function isTestEnvironment() {
-  return CONFIG.nodeEnv === "test" || process.env.NODE_ENV === "test";
+  return CONFIG.isTest();
 }
 
 /**
@@ -64,8 +64,10 @@ function initFirebase() {
       return firebaseApp;
     }
 
-    if (CONFIG.nodeEnv === "production") {
+    if (CONFIG.isProduction()) {
       console.error("🚨 [CRITICAL Firebase Error]: Firebase Admin credentials not configured in production!");
+    } else if (CONFIG.isStaging()) {
+      console.error("🚨 [CRITICAL Firebase Error]: Firebase Admin credentials not configured in staging!");
     } else {
       console.warn("⚠️  [Firebase Warning] Firebase Admin credentials not configured. Live token verification will reject tokens until .env is configured.");
     }
@@ -114,13 +116,15 @@ async function verifyIdToken(idToken) {
     throw err;
   }
 
-  // Strict production boundary: simulated or mock tokens are strictly forbidden in production
-  if (CONFIG.nodeEnv === "production" || process.env.NODE_ENV === "production") {
-    if (idToken.startsWith("mock-") || idToken.startsWith("demo_")) {
-      const err = new Error("Simulator tokens are strictly forbidden in production.");
-      err.code = "INVALID_TOKEN";
-      err.statusCode = 401;
-      throw err;
+  // Strict production/staging boundary: simulated or mock tokens are strictly forbidden outside local dev
+  if (idToken.startsWith("mock-") || idToken.startsWith("demo_")) {
+    if (CONFIG.isLiveEnvironment() || !CONFIG.isDevelopment()) {
+      if (!CONFIG.isTest()) {
+        const err = new Error("Simulator tokens are strictly forbidden in production and staging environments (permitted only in local development).");
+        err.code = "INVALID_TOKEN";
+        err.statusCode = 401;
+        throw err;
+      }
     }
   }
 
@@ -142,7 +146,7 @@ async function verifyIdToken(idToken) {
   }
 
   if (!firebaseApp) {
-    if (CONFIG.nodeEnv === "development" && typeof idToken === "string" && idToken.startsWith("mock-")) {
+    if (CONFIG.isDevelopment() && !CONFIG.isLiveEnvironment() && typeof idToken === "string" && idToken.startsWith("mock-")) {
       const devTokens = {
         "mock-super-admin-token": { uid: "dev_super_raghav", phone_number: "+919811000001" },
         "mock-artist-divya-token": { uid: "dev_divya_artist", phone_number: "+919811000002" },

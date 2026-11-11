@@ -102,7 +102,7 @@ async function getEnrichedOverview(filters = {}) {
        COUNT(*) FILTER (WHERE order_status = 'DELIVERED')::int AS completed_orders,
        COUNT(*) FILTER (WHERE order_status = 'CANCELLED')::int AS cancelled_orders,
        COALESCE(SUM(CASE WHEN order_status != 'CANCELLED' THEN total_amount ELSE 0 END), 0.00) AS total_order_amount,
-       COALESCE(SUM(CASE WHEN payment_status IN ('VERIFIED', 'PAID') THEN total_amount ELSE 0 END), 0.00) AS paid_revenue,
+       COALESCE(SUM(CASE WHEN payment_status IN ('VERIFIED', 'PAID') AND order_status != 'CANCELLED' THEN total_amount ELSE 0 END), 0.00) AS paid_revenue,
        COALESCE(SUM(CASE WHEN payment_status IN ('PENDING', 'UNPAID', 'INITIATED', 'MANUAL_VERIFY_REQ') AND order_status != 'CANCELLED' THEN total_amount ELSE 0 END), 0.00) AS pending_payment_amount,
        COALESCE(SUM(CASE WHEN payment_status IN ('REFUNDED', 'PARTIALLY_REFUNDED') THEN total_amount ELSE 0 END), 0.00) AS refunded_amount
      FROM orders ${orderTimeClause};`,

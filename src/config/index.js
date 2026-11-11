@@ -31,7 +31,32 @@ const isSslRequired = process.env.PGSSLMODE === "require" || process.env.DATABAS
 
 const CONFIG = {
   port: parseInt(process.env.PORT || "3000", 10),
-  nodeEnv: process.env.NODE_ENV || "development",
+  get nodeEnv() {
+    return process.env.NODE_ENV || "development";
+  },
+  set nodeEnv(val) {
+    process.env.NODE_ENV = val;
+  },
+  isProduction() {
+    const env = (process.env.NODE_ENV || this.nodeEnv || "").toLowerCase().trim();
+    return env === "production" || env === "prod";
+  },
+  isStaging() {
+    const env = (process.env.NODE_ENV || this.nodeEnv || "").toLowerCase().trim();
+    return env === "staging" || env === "stage";
+  },
+  isTest() {
+    const env = (process.env.NODE_ENV || this.nodeEnv || "").toLowerCase().trim();
+    return env === "test";
+  },
+  isDevelopment() {
+    if (this.isProduction() || this.isStaging() || this.isTest()) return false;
+    const env = (process.env.NODE_ENV || this.nodeEnv || "").toLowerCase().trim();
+    return env === "development" || env === "dev" || env === "local";
+  },
+  isLiveEnvironment() {
+    return this.isProduction() || this.isStaging();
+  },
   geminiApiKey: process.env.GEMINI_API_KEY || "",
   geminiModel: process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview",
   adminApiKey: process.env.ADMIN_API_KEY || process.env.REBUILD_SECRET || "",
