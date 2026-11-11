@@ -37,19 +37,30 @@ const ALLOWED_DEV_ORIGINS = [
 function isOriginAllowed(origin, env) {
   if (!origin) return true;
 
-  if (process.env.ALLOWED_ORIGINS) {
-    const customAllowed = process.env.ALLOWED_ORIGINS.split(",").map((s) => s.trim());
-    if (customAllowed.includes(origin)) return true;
-  }
-
   const currentEnv = env || (CONFIG.isProduction() ? "production" : (CONFIG.isStaging() ? "staging" : "development"));
+  const envOrigins = process.env.ALLOWED_ORIGINS || process.env.CORS_ORIGIN;
 
   if (currentEnv === "production") {
+    if (envOrigins) {
+      const customAllowed = envOrigins.split(",").map((s) => s.trim()).filter(Boolean);
+      const sanitizedProd = customAllowed.filter(
+        (o) => !ALLOWED_STAGING_ORIGINS.includes(o) && !ALLOWED_DEV_ORIGINS.includes(o) && !o.includes("localhost") && !o.includes("127.0.0.1")
+      );
+      if (sanitizedProd.includes(origin)) return true;
+    }
     return ALLOWED_PROD_ORIGINS.includes(origin);
   }
 
   if (currentEnv === "staging") {
-    return ALLOWED_STAGING_ORIGINS.includes(origin) || ALLOWED_PROD_ORIGINS.includes(origin);
+    if (envOrigins) {
+      const customAllowed = envOrigins.split(",").map((s) => s.trim()).filter(Boolean);
+      // Strictly prevent production and localhost origins on staging API
+      const sanitizedStaging = customAllowed.filter(
+        (o) => !ALLOWED_PROD_ORIGINS.includes(o) && !ALLOWED_DEV_ORIGINS.includes(o) && !o.includes("localhost") && !o.includes("127.0.0.1")
+      );
+      if (sanitizedStaging.includes(origin)) return true;
+    }
+    return ALLOWED_STAGING_ORIGINS.includes(origin);
   }
 
   if (
@@ -61,7 +72,7 @@ function isOriginAllowed(origin, env) {
     return true;
   }
 
-  return currentEnv === "development";
+  return currentEnv === "development" || currentEnv === "test";
 }
 
 function getCorsOriginValidator(env) {

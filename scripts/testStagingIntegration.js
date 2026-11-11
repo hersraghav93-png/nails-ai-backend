@@ -33,6 +33,7 @@ const { getOrCreateCart, addItemToCart, getCartDetails, claimGuestCart } = requi
 const { createOrderFromCart, getOrderById } = require("../src/services/orderService");
 const { createAppointmentRequest, confirmAppointment, getAppointmentById } = require("../src/services/bookingService");
 const { sendWhatsAppNotification, verifyWebhookSignature } = require("../src/services/notifications/whatsappAdapter");
+const { getCorsOriginValidator } = require("../src/middleware/corsConfig");
 
 let server;
 let baseUrl;
@@ -633,6 +634,70 @@ async function runStagingSmokeTests() {
         assert(err.message.includes("Access denied") || err.code === "FORBIDDEN_ORDER_ACCESS");
       }
       assert.strictEqual(blocked, true, "Cross-customer access without credentials must be blocked");
+    });
+
+    // --------------------------------------------------------------------------
+    // TEST 11: STAGING CORS ISOLATION & PRODUCTION ORIGIN REJECTION
+    // --------------------------------------------------------------------------
+    console.log("\n▶ [Test 11] Staging CORS Isolation & Production Protection");
+
+    await it("Staging CORS allows staging domain and rejects production / localhost", async () => {
+      const stagingValidator = getCorsOriginValidator("staging");
+
+      // Verify approved staging origin
+      await new Promise((resolve, reject) => {
+        stagingValidator("https://staging.nailsbydivya.store", (err, allow) => {
+          try {
+            assert.strictEqual(err, null);
+            assert.strictEqual(allow, true);
+            resolve();
+          } catch (e) { reject(e); }
+        });
+      });
+
+      // Verify approved staging preview origin
+      await new Promise((resolve, reject) => {
+        stagingValidator("https://staging-admin.nailsbydivya.store", (err, allow) => {
+          try {
+            assert.strictEqual(err, null);
+            assert.strictEqual(allow, true);
+            resolve();
+          } catch (e) { reject(e); }
+        });
+      });
+
+      // Verify production apex rejection
+      await new Promise((resolve, reject) => {
+        stagingValidator("https://nailsbydivya.store", (err, allow) => {
+          try {
+            assert(err !== null, "Staging API must reject production apex domain");
+            assert.strictEqual(allow, false);
+            resolve();
+          } catch (e) { reject(e); }
+        });
+      });
+
+      // Verify production www rejection
+      await new Promise((resolve, reject) => {
+        stagingValidator("https://www.nailsbydivya.store", (err, allow) => {
+          try {
+            assert(err !== null, "Staging API must reject production www domain");
+            assert.strictEqual(allow, false);
+            resolve();
+          } catch (e) { reject(e); }
+        });
+      });
+
+      // Verify localhost rejection in staging
+      await new Promise((resolve, reject) => {
+        stagingValidator("http://localhost:8080", (err, allow) => {
+          try {
+            assert(err !== null, "Staging API must reject localhost origins in staging");
+            assert.strictEqual(allow, false);
+            resolve();
+          } catch (e) { reject(e); }
+        });
+      });
     });
 
     console.log("\n===============================================================================");

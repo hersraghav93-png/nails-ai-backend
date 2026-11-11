@@ -17,7 +17,7 @@ services:
     startCommand: npm start
     healthCheckPath: /health
     autoDeploy: false
-    customDomains:
+    domains:
       - staging-api.nailsbydivya.store
     envVars:
       # Application Environment
@@ -36,9 +36,11 @@ services:
           name: nailsbydivya-staging-db
           property: connectionString
 
-      # CORS Strict Allowlist for Staging
+      # CORS Strict Allowlist for Staging (Strictly isolated: production and localhost origins prohibited)
+      - key: ALLOWED_ORIGINS
+        value: https://staging.nailsbydivya.store,https://staging-admin.nailsbydivya.store,https://preview.nailsbydivya.store
       - key: CORS_ORIGIN
-        value: https://staging.nailsbydivya.store,https://nailsbydivya.store,https://www.nailsbydivya.store,http://localhost:8080,http://127.0.0.1:8080
+        value: https://staging.nailsbydivya.store,https://staging-admin.nailsbydivya.store,https://preview.nailsbydivya.store
       - key: CORS_CREDENTIALS
         value: "true"
 

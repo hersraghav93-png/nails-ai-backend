@@ -124,6 +124,57 @@ async function runCommunicationsSuite() {
     });
   });
 
+  it("Staging validator enforces strict staging isolation (allows staging, rejects prod and localhost)", () => {
+    const stagingValidator = getCorsOriginValidator("staging");
+
+    // Allowed staging origins
+    stagingValidator("https://staging.nailsbydivya.store", (err, allow) => {
+      assert.strictEqual(err, null);
+      assert.strictEqual(allow, true);
+    });
+    stagingValidator("https://staging-admin.nailsbydivya.store", (err, allow) => {
+      assert.strictEqual(err, null);
+      assert.strictEqual(allow, true);
+    });
+    stagingValidator("https://preview.nailsbydivya.store", (err, allow) => {
+      assert.strictEqual(err, null);
+      assert.strictEqual(allow, true);
+    });
+
+    // Prohibited on staging: production apex and www domains
+    stagingValidator("https://nailsbydivya.store", (err, allow) => {
+      assert(err !== null, "Staging API must reject production apex domain");
+      assert.strictEqual(allow, false);
+    });
+    stagingValidator("https://www.nailsbydivya.store", (err, allow) => {
+      assert(err !== null, "Staging API must reject production www domain");
+      assert.strictEqual(allow, false);
+    });
+
+    // Prohibited on staging: localhost origins
+    stagingValidator("http://localhost:8080", (err, allow) => {
+      assert(err !== null, "Staging API must reject localhost origins");
+      assert.strictEqual(allow, false);
+    });
+    stagingValidator("http://127.0.0.1:8080", (err, allow) => {
+      assert(err !== null, "Staging API must reject 127.0.0.1 origins");
+      assert.strictEqual(allow, false);
+    });
+  });
+
+  it("Production validator enforces strict production isolation (rejects staging and localhost)", () => {
+    const prodValidator = getCorsOriginValidator("production");
+
+    prodValidator("https://staging.nailsbydivya.store", (err, allow) => {
+      assert(err !== null, "Production API must reject staging domain");
+      assert.strictEqual(allow, false);
+    });
+    prodValidator("http://localhost:8080", (err, allow) => {
+      assert(err !== null, "Production API must reject localhost in production");
+      assert.strictEqual(allow, false);
+    });
+  });
+
   // ===========================================================================
   // TEST SECTION 2: TEMPLATES & PRE-FILLED WHATSAPP CLICK-TO-CHAT
   // ===========================================================================
