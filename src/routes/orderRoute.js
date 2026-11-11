@@ -98,8 +98,8 @@ router.post("/", optionalAuth, async (req, res) => {
       sessionToken,
       userId,
       customer: req.body && req.body.customer,
-      shippingAddress: req.body && req.body.shipping_address,
-      customerNotes: req.body && req.body.customer_notes,
+      shippingAddress: req.body && (req.body.shipping_address || req.body.shippingAddress),
+      customerNotes: req.body && (req.body.customer_notes || req.body.customerNotes),
       idempotencyKey,
       ipAddress: req.ip,
     });

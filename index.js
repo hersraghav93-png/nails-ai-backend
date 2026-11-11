@@ -15,6 +15,7 @@ const adminRouter = require("./src/routes/adminRoute");
 const cartRouter = require("./src/routes/cartRoute");
 const orderRouter = require("./src/routes/orderRoute");
 const bookingRouter = require("./src/routes/bookingRoute");
+const productRouter = require("./src/routes/productRoute");
 
 const { closePool } = require("./src/db/pool");
 const { getCorsMiddleware } = require("./src/middleware/corsConfig");
@@ -37,6 +38,7 @@ app.use("/api/customer", customerRouter);
 app.use("/api/admin", adminRateLimiter, adminRouter);
 app.use("/api/cart", cartRouter);
 app.use("/api/orders", orderRouter);
+app.use("/api/products", productRouter);
 app.use("/api", bookingRouter);
 
 // 4. Start Server (if executed directly)

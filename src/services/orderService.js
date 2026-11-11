@@ -563,7 +563,7 @@ async function createOrderFromCart({
  * @returns {Promise<object>}
  */
 async function getOrderById(orderId, authContext = {}) {
-  const { userId, sessionToken, claimSecret, isAdmin, skipAuthCheck } = authContext;
+  const { userId, sessionToken, claimSecret, isAdmin, skipAuthCheck } = authContext || {};
 
   const orderRes = await query(
     `SELECT * FROM orders WHERE id = $1;`,

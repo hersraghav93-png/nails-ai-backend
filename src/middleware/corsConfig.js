@@ -79,7 +79,8 @@ function getCorsMiddleware() {
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "x-admin-key"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-admin-key", "X-Cart-Session", "x-cart-session"],
+    exposedHeaders: ["X-Cart-Session", "x-cart-session"],
     maxAge: 86400, // 24 hours pre-flight caching
   });
 }
