@@ -101,7 +101,7 @@ async function runTests() {
     assert(cartWithItem.totals.subtotal === 1998, `Subtotal for 2 sets at ₹999 is ₹1998 (got ₹${cartWithItem.totals.subtotal})`);
     assert(cartWithItem.totals.discountAmount === 800, `Festive offer discount is ₹800 (got ₹${cartWithItem.totals.discountAmount})`);
     assert(cartWithItem.totals.totalAmount === 1198, `Grand total for 2 sets is ₹1198 (got ₹${cartWithItem.totals.totalAmount})`);
-    assert(cartWithItem.totals.shippingFee === 0, "Complimentary Standard Delivery fee is ₹0");
+    assert(cartWithItem.totals.shippingFee === 0, "Delivery fee baseline is ₹0 (delivery arrangements confirmed by studio before fulfilment)");
 
     // Checkout guest order
     const orderResult = await createOrderFromCart({
@@ -263,7 +263,7 @@ async function runTests() {
     const pricedCart = await getCartDetails(tamperCart.id);
     assert(pricedCart.items[0].unitPrice === 599, `Server enforced official ₹599 festive price, ignoring client price 1.0 (got ₹${pricedCart.items[0].unitPrice})`);
     assert(pricedCart.totals.totalAmount === 599, `Server recalculated grand total to ₹599 (got ₹${pricedCart.totals.totalAmount})`);
-    assert(pricedCart.totals.shippingFee === 0, "Delivery fee is strictly ₹0 (Complimentary Standard Delivery)");
+    assert(pricedCart.totals.shippingFee === 0, "Delivery fee is ₹0 baseline (charges confirmed by studio prior to fulfilment)");
   } catch (err) {
     console.error("Test 5 error:", err);
     testsFailed++;
