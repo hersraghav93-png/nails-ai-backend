@@ -12,6 +12,11 @@
 const express = require("express");
 const { requireAuth, requireRole, requirePermission } = require("../middleware/auth");
 const { query } = require("../db/pool");
+const {
+  adminListOrders,
+  adminUpdateOrderStatus,
+  getOrderById,
+} = require("../services/orderService");
 
 const router = express.Router();
 
@@ -83,6 +88,92 @@ router.get("/overview", requirePermission("catalog:view"), async (req, res) => {
     res.status(500).json({
       error: "Failed to retrieve administrative overview metrics.",
       code: "METRICS_FETCH_ERROR",
+    });
+  }
+});
+
+/**
+ * GET /api/admin/orders
+ * Requires 'View Orders' permission.
+ * Lists orders with filtering, pagination, and customer info.
+ */
+router.get("/orders", requirePermission("View Orders"), async (req, res) => {
+  try {
+    const result = await adminListOrders({
+      status: req.query.status,
+      paymentStatus: req.query.payment_status,
+      fulfilmentStatus: req.query.fulfilment_status,
+      search: req.query.search,
+      limit: req.query.limit,
+      offset: req.query.offset,
+    });
+
+    return res.json({
+      status: "success",
+      ...result,
+    });
+  } catch (err) {
+    const status = err.statusCode || 500;
+    return res.status(status).json({
+      error: err.message || "Failed to list orders.",
+      code: err.code || "ADMIN_ORDER_LIST_FAILED",
+    });
+  }
+});
+
+/**
+ * GET /api/admin/orders/:orderId
+ * Requires 'View Orders' permission.
+ * Retrieves full order details, line items, and complete status history.
+ */
+router.get("/orders/:orderId", requirePermission("View Orders"), async (req, res) => {
+  try {
+    const orderDetails = await getOrderById(req.params.orderId, {
+      isAdmin: true,
+      skipAuthCheck: true,
+    });
+
+    return res.json({
+      status: "success",
+      ...orderDetails,
+    });
+  } catch (err) {
+    const status = err.statusCode || 404;
+    return res.status(status).json({
+      error: err.message || "Failed to retrieve order.",
+      code: err.code || "ADMIN_ORDER_FETCH_FAILED",
+    });
+  }
+});
+
+/**
+ * PATCH /api/admin/orders/:orderId/status
+ * Requires 'Update Order Fulfillment' permission.
+ * Updates order and/or fulfilment status, writes audit log, and records status history.
+ */
+router.patch("/orders/:orderId/status", requirePermission("Update Order Fulfillment"), async (req, res) => {
+  try {
+    const updated = await adminUpdateOrderStatus(
+      req.params.orderId,
+      {
+        orderStatus: req.body && req.body.order_status,
+        fulfilmentStatus: req.body && req.body.fulfilment_status,
+        notes: req.body && req.body.notes,
+      },
+      req.user,
+      req.ip
+    );
+
+    return res.json({
+      status: "success",
+      message: "Order status updated successfully.",
+      ...updated,
+    });
+  } catch (err) {
+    const status = err.statusCode || 400;
+    return res.status(status).json({
+      error: err.message || "Failed to update order status.",
+      code: err.code || "ADMIN_ORDER_UPDATE_FAILED",
     });
   }
 });

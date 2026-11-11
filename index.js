@@ -13,6 +13,8 @@ const chatRouter = require("./src/routes/chatRoute");
 const authRouter = require("./src/routes/authRoute");
 const customerRouter = require("./src/routes/customerRoute");
 const adminRouter = require("./src/routes/adminRoute");
+const cartRouter = require("./src/routes/cartRoute");
+const orderRouter = require("./src/routes/orderRoute");
 
 const { closePool } = require("./src/db/pool");
 
@@ -30,6 +32,8 @@ app.use("/", chatRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/customer", customerRouter);
 app.use("/api/admin", adminRouter);
+app.use("/api/cart", cartRouter);
+app.use("/api/orders", orderRouter);
 
 // 4. Start Server (if executed directly)
 let server;
