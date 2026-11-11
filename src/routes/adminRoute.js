@@ -1,13 +1,36 @@
 /**
  * ==========================================================================
  * ADMINISTRATOR ROUTER (`src/routes/adminRoute.js`)
- * Nails by Divya Platform
+ * Nails by Divya Platform — Phase 2C Admin Operations Engine
  *
  * Provides protected administrative endpoints:
- * - GET /api/admin/me       -> Admin identity, role assignments, and permissions
- * - GET /api/admin/overview -> High-level operational metrics and system stats
+ * - GET   /api/admin/me            -> Admin identity, role assignments, and permissions
+ * - GET   /api/admin/overview      -> Real-time operational metrics & revenue breakdown
+ * - GET   /api/admin/orders        -> Orders list with search, status filters, and pagination
+ * - GET   /api/admin/orders/:id    -> Order details, items, sizing, delivery, status history
+ * - PATCH /api/admin/orders/:id/status -> Advance fulfillment/order status & audit log
+ * - POST  /api/admin/orders/:id/cancel -> Cancel eligible orders & audit log
+ * - GET   /api/admin/bookings      -> Delhi NCR appointment list with calendar filters
+ * - GET   /api/admin/bookings/:id  -> Appointment details, address, client, status history
+ * - PATCH /api/admin/bookings/:id/confirm -> Confirm appointment with locked time window
+ * - PATCH /api/admin/bookings/:id/propose-slot -> Propose alternative date/slot with token
+ * - PATCH /api/admin/bookings/:id/reject  -> Decline appointment with explicit reason
+ * - PATCH /api/admin/bookings/:id/cancel  -> Studio cancellation with reason
+ * - PATCH /api/admin/bookings/:id/status  -> Operational progress (IN_PROGRESS, COMPLETED)
+ * - GET   /api/admin/customers     -> Customer directory with search, order & booking counts
+ * - GET   /api/admin/customers/:id -> Customer profile, saved addresses, sizing, histories
+ * - GET   /api/admin/products      -> Catalog products with SKU, prices, stock, primary images
+ * - PATCH /api/admin/products/:id/availability -> Toggle product availability with audit log
+ * - GET   /api/admin/services      -> Salon services with duration, NULL quotation, add-ons
+ * - PATCH /api/admin/services/:id/availability -> Toggle service availability with audit log
+ * - GET   /api/admin/staff         -> Administrative staff directory & assigned roles
+ * - GET   /api/admin/roles         -> Roles & permissions matrix
+ * - GET   /api/admin/settings      -> Business configuration settings
+ * - GET   /api/admin/audit-logs    -> Immutable audit log trail
  * ==========================================================================
  */
+
+"use strict";
 
 const express = require("express");
 const { requireAuth, requireRole, requirePermission } = require("../middleware/auth");
@@ -16,6 +39,7 @@ const {
   adminListOrders,
   adminUpdateOrderStatus,
   getOrderById,
+  cancelOrder,
 } = require("../services/orderService");
 const {
   adminListAppointments,
@@ -26,12 +50,29 @@ const {
   updateAppointmentStatus,
   getAppointmentById,
 } = require("../services/bookingService");
+const {
+  getEnrichedOverview,
+  listCustomers,
+  getCustomerDetails,
+  listAdminProducts,
+  toggleProductAvailability,
+  listAdminServices,
+  toggleServiceAvailability,
+  listStaffAccounts,
+  getRolePermissionMatrix,
+  listBusinessSettings,
+  listAuditLogs,
+} = require("../services/adminService");
 
 const router = express.Router();
 
 // Base middleware for all admin endpoints: Must be authenticated and hold an admin role
 router.use(requireAuth);
 router.use(requireRole(["super_operator", "artist_divya", "staff_artist", "support_staff"]));
+
+// =============================================================================
+// 1. ADMIN IDENTITY & OVERVIEW
+// =============================================================================
 
 /**
  * GET /api/admin/me
@@ -44,6 +85,7 @@ router.get("/me", (req, res) => {
       userId: req.user.id,
       firebaseUid: req.user.firebase_uid,
       phone: req.user.phone,
+      email: req.user.email,
       displayName: req.user.adminProfile ? req.user.adminProfile.display_name : null,
       isMfaEnabled: req.user.adminProfile ? req.user.adminProfile.is_mfa_enabled : false,
       roles: req.user.roles,
@@ -56,36 +98,19 @@ router.get("/me", (req, res) => {
 /**
  * GET /api/admin/overview
  * Requires 'catalog:view' permission (super_operator, artist_divya, staff_artist).
- * Returns real-time platform metrics from PostgreSQL.
+ * Returns real-time platform metrics, revenue distinction (paid vs unpaid), and recent activity.
  */
 router.get("/overview", requirePermission("catalog:view"), async (req, res) => {
   try {
-    const [
-      usersCountRes,
-      productsCountRes,
-      servicesCountRes,
-      ordersCountRes,
-      bookingsCountRes,
-      designsCountRes,
-    ] = await Promise.all([
-      query(`SELECT COUNT(*)::int AS count FROM users;`),
-      query(`SELECT COUNT(*)::int AS count FROM products;`),
-      query(`SELECT COUNT(*)::int AS count FROM services;`),
-      query(`SELECT COUNT(*)::int AS count FROM orders;`),
-      query(`SELECT COUNT(*)::int AS count FROM bookings;`),
-      query(`SELECT COUNT(*)::int AS count FROM portfolio_designs;`),
-    ]);
+    const overviewData = await getEnrichedOverview({
+      range: req.query.range,
+      dateFrom: req.query.date_from,
+      dateTo: req.query.date_to,
+    });
 
     res.json({
       status: "success",
-      overview: {
-        totalUsers: usersCountRes.rows[0].count,
-        totalProducts: productsCountRes.rows[0].count,
-        totalServices: servicesCountRes.rows[0].count,
-        totalOrders: ordersCountRes.rows[0].count,
-        totalBookings: bookingsCountRes.rows[0].count,
-        totalPortfolioDesigns: designsCountRes.rows[0].count,
-      },
+      overview: overviewData,
       requestedBy: {
         userId: req.user.id,
         role: req.user.roles[0] || null,
@@ -100,6 +125,10 @@ router.get("/overview", requirePermission("catalog:view"), async (req, res) => {
     });
   }
 });
+
+// =============================================================================
+// 2. ORDER MANAGEMENT
+// =============================================================================
 
 /**
  * GET /api/admin/orders
@@ -133,7 +162,7 @@ router.get("/orders", requirePermission("View Orders"), async (req, res) => {
 /**
  * GET /api/admin/orders/:orderId
  * Requires 'View Orders' permission.
- * Retrieves full order details, line items, and complete status history.
+ * Retrieves full order details, line items, sizing, shipping, and complete status history.
  */
 router.get("/orders/:orderId", requirePermission("View Orders"), async (req, res) => {
   try {
@@ -187,8 +216,35 @@ router.patch("/orders/:orderId/status", requirePermission("Update Order Fulfillm
   }
 });
 
+/**
+ * POST /api/admin/orders/:orderId/cancel
+ * Requires 'Update Order Fulfillment' permission.
+ * Cancels eligible orders, creates cancellation history record and audit log.
+ */
+router.post("/orders/:orderId/cancel", requirePermission("Update Order Fulfillment"), async (req, res) => {
+  try {
+    const cancelled = await cancelOrder(req.params.orderId, {
+      userId: req.user.id,
+      isAdmin: true,
+      reason: req.body && req.body.reason,
+    });
+
+    return res.json({
+      status: "success",
+      message: "Order cancelled successfully.",
+      ...cancelled,
+    });
+  } catch (err) {
+    const status = err.statusCode || 400;
+    return res.status(status).json({
+      error: err.message || "Failed to cancel order.",
+      code: err.code || "ADMIN_ORDER_CANCEL_FAILED",
+    });
+  }
+});
+
 // =============================================================================
-// ADMINISTRATIVE AT-HOME APPOINTMENTS (Delhi NCR)
+// 3. APPOINTMENT MANAGEMENT (Delhi NCR)
 // =============================================================================
 
 /**
@@ -395,6 +451,268 @@ router.patch("/bookings/:bookingId/status", requirePermission("Confirm or Declin
     return res.status(status).json({
       error: err.message || "Failed to update appointment status.",
       code: err.code || "ADMIN_UPDATE_STATUS_FAILED",
+    });
+  }
+});
+
+// =============================================================================
+// 4. CUSTOMER MANAGEMENT
+// =============================================================================
+
+/**
+ * GET /api/admin/customers
+ * Requires 'View Orders' permission.
+ * Lists registered customers with search, order/booking metrics, and contact info.
+ */
+router.get("/customers", requirePermission("View Orders"), async (req, res) => {
+  try {
+    const result = await listCustomers({
+      search: req.query.search,
+      limit: req.query.limit,
+      offset: req.query.offset,
+    });
+
+    return res.json({
+      status: "success",
+      ...result,
+    });
+  } catch (err) {
+    const status = err.statusCode || 500;
+    return res.status(status).json({
+      error: err.message || "Failed to list customers.",
+      code: "ADMIN_CUSTOMER_LIST_FAILED",
+    });
+  }
+});
+
+/**
+ * GET /api/admin/customers/:customerId
+ * Requires 'View Orders' permission.
+ * Retrieves full customer details: profile, sizing, saved addresses, orders, and bookings.
+ */
+router.get("/customers/:customerId", requirePermission("View Orders"), async (req, res) => {
+  try {
+    const result = await getCustomerDetails(req.params.customerId);
+
+    return res.json({
+      status: "success",
+      ...result,
+    });
+  } catch (err) {
+    const status = err.statusCode || 404;
+    return res.status(status).json({
+      error: err.message || "Failed to retrieve customer details.",
+      code: err.code || "ADMIN_CUSTOMER_FETCH_FAILED",
+    });
+  }
+});
+
+// =============================================================================
+// 5. PRODUCT & SERVICE MANAGEMENT
+// =============================================================================
+
+/**
+ * GET /api/admin/products
+ * Requires 'View Catalog' permission.
+ * Lists catalog products with SKU, variants, price, and active status.
+ */
+router.get("/products", requirePermission("View Catalog"), async (req, res) => {
+  try {
+    const result = await listAdminProducts({
+      category: req.query.category,
+      search: req.query.search,
+      limit: req.query.limit,
+      offset: req.query.offset,
+    });
+
+    return res.json({
+      status: "success",
+      ...result,
+    });
+  } catch (err) {
+    const status = err.statusCode || 500;
+    return res.status(status).json({
+      error: err.message || "Failed to list catalog products.",
+      code: "ADMIN_PRODUCT_LIST_FAILED",
+    });
+  }
+});
+
+/**
+ * PATCH /api/admin/products/:productId/availability
+ * Requires 'Toggle Availability' permission.
+ * Toggles product active status and records audit log.
+ */
+router.patch("/products/:productId/availability", requirePermission("Toggle Availability"), async (req, res) => {
+  try {
+    const result = await toggleProductAvailability(
+      req.params.productId,
+      req.body && req.body.is_active,
+      req.user,
+      req.ip
+    );
+
+    return res.json({
+      status: "success",
+      message: "Product availability updated successfully.",
+      product: result,
+    });
+  } catch (err) {
+    const status = err.statusCode || 400;
+    return res.status(status).json({
+      error: err.message || "Failed to update product availability.",
+      code: err.code || "ADMIN_PRODUCT_AVAILABILITY_FAILED",
+    });
+  }
+});
+
+/**
+ * GET /api/admin/services
+ * Requires 'View Catalog' permission.
+ * Lists salon services with durations, NULL prices for manual quote, and active add-ons.
+ */
+router.get("/services", requirePermission("View Catalog"), async (req, res) => {
+  try {
+    const services = await listAdminServices();
+
+    return res.json({
+      status: "success",
+      services,
+    });
+  } catch (err) {
+    const status = err.statusCode || 500;
+    return res.status(status).json({
+      error: err.message || "Failed to list services.",
+      code: "ADMIN_SERVICE_LIST_FAILED",
+    });
+  }
+});
+
+/**
+ * PATCH /api/admin/services/:serviceId/availability
+ * Requires 'Toggle Availability' permission.
+ * Toggles service active status and records audit log.
+ */
+router.patch("/services/:serviceId/availability", requirePermission("Toggle Availability"), async (req, res) => {
+  try {
+    const result = await toggleServiceAvailability(
+      req.params.serviceId,
+      req.body && req.body.is_active,
+      req.user,
+      req.ip
+    );
+
+    return res.json({
+      status: "success",
+      message: "Service availability updated successfully.",
+      service: result,
+    });
+  } catch (err) {
+    const status = err.statusCode || 400;
+    return res.status(status).json({
+      error: err.message || "Failed to update service availability.",
+      code: err.code || "ADMIN_SERVICE_AVAILABILITY_FAILED",
+    });
+  }
+});
+
+// =============================================================================
+// 6. STAFF ROLES & PERMISSIONS
+// =============================================================================
+
+/**
+ * GET /api/admin/staff
+ * Requires 'Manage Staff Accounts' permission (super_operator).
+ * Lists all staff members with assigned roles and granted permissions.
+ */
+router.get("/staff", requirePermission("Manage Staff Accounts"), async (req, res) => {
+  try {
+    const staff = await listStaffAccounts();
+
+    return res.json({
+      status: "success",
+      staff,
+    });
+  } catch (err) {
+    const status = err.statusCode || 500;
+    return res.status(status).json({
+      error: err.message || "Failed to list staff accounts.",
+      code: "ADMIN_STAFF_LIST_FAILED",
+    });
+  }
+});
+
+/**
+ * GET /api/admin/roles
+ * Requires 'View Catalog' or 'View Orders' permission.
+ * Returns role definitions and permission mappings.
+ */
+router.get("/roles", requirePermission("View Catalog"), async (req, res) => {
+  try {
+    const matrix = await getRolePermissionMatrix();
+
+    return res.json({
+      status: "success",
+      ...matrix,
+    });
+  } catch (err) {
+    const status = err.statusCode || 500;
+    return res.status(status).json({
+      error: err.message || "Failed to retrieve roles matrix.",
+      code: "ADMIN_ROLES_FETCH_FAILED",
+    });
+  }
+});
+
+// =============================================================================
+// 7. BUSINESS SETTINGS & AUDIT LOGS
+// =============================================================================
+
+/**
+ * GET /api/admin/settings
+ * Requires 'View Catalog' permission.
+ * Lists operational business settings.
+ */
+router.get("/settings", requirePermission("View Catalog"), async (req, res) => {
+  try {
+    const settings = await listBusinessSettings();
+
+    return res.json({
+      status: "success",
+      settings,
+    });
+  } catch (err) {
+    const status = err.statusCode || 500;
+    return res.status(status).json({
+      error: err.message || "Failed to list business settings.",
+      code: "ADMIN_SETTINGS_FETCH_FAILED",
+    });
+  }
+});
+
+/**
+ * GET /api/admin/audit-logs
+ * Requires 'View Audit Logs' permission (super_operator).
+ * Lists immutable audit log trail with pagination and filters.
+ */
+router.get("/audit-logs", requirePermission("View Audit Logs"), async (req, res) => {
+  try {
+    const result = await listAuditLogs({
+      limit: req.query.limit,
+      offset: req.query.offset,
+      action: req.query.action,
+      targetEntity: req.query.target_entity,
+    });
+
+    return res.json({
+      status: "success",
+      ...result,
+    });
+  } catch (err) {
+    const status = err.statusCode || 500;
+    return res.status(status).json({
+      error: err.message || "Failed to list audit logs.",
+      code: "ADMIN_AUDIT_LOGS_FAILED",
     });
   }
 });

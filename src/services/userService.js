@@ -212,6 +212,20 @@ async function findOrCreateUserByFirebaseToken(decodedToken) {
     throw new Error("Failed to resolve or create user account.");
   }
 
+  // Development-only: auto-link simulator admin roles if in development mode
+  if (process.env.NODE_ENV === "development") {
+    if (user.firebase_uid === "dev_super_raghav") {
+      await query("INSERT INTO user_roles (user_id, role_id) VALUES ($1, 'super_operator') ON CONFLICT DO NOTHING;", [user.id]);
+      await query("INSERT INTO admin_profiles (user_id, display_name, is_mfa_enabled) VALUES ($1, 'Raghav', TRUE) ON CONFLICT (user_id) DO UPDATE SET display_name = 'Raghav';", [user.id]);
+    } else if (user.firebase_uid === "dev_divya_artist") {
+      await query("INSERT INTO user_roles (user_id, role_id) VALUES ($1, 'artist_divya') ON CONFLICT DO NOTHING;", [user.id]);
+      await query("INSERT INTO admin_profiles (user_id, display_name, is_mfa_enabled) VALUES ($1, 'Divya', TRUE) ON CONFLICT (user_id) DO UPDATE SET display_name = 'Divya';", [user.id]);
+    } else if (user.firebase_uid === "dev_staff_priya") {
+      await query("INSERT INTO user_roles (user_id, role_id) VALUES ($1, 'staff_artist') ON CONFLICT DO NOTHING;", [user.id]);
+      await query("INSERT INTO admin_profiles (user_id, display_name, is_mfa_enabled) VALUES ($1, 'Priya', FALSE) ON CONFLICT (user_id) DO UPDATE SET display_name = 'Priya';", [user.id]);
+    }
+  }
+
   // 4. Retrieve roles and permissions
   const rolePermRes = await query(
     `SELECT r.id AS role_id, r.name AS role_name, p.id AS permission_id

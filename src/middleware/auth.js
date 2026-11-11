@@ -148,14 +148,35 @@ function requireRole(roles) {
   };
 }
 
+// Canonical mapping between human-readable permission names and database permission IDs
+const PERMISSION_ALIASES = {
+  "View Catalog": "catalog:view",
+  "Edit Catalog Details": "catalog:edit_details",
+  "Edit Base Pricing": "catalog:edit_base_pricing",
+  "Toggle Availability": "catalog:toggle_availability",
+  "View Orders": "orders:read",
+  "Update Order Fulfillment": "orders:update_status",
+  "Process Refunds": "orders:refund",
+  "View Bookings": "bookings:read",
+  "Confirm or Decline Bookings": "bookings:approve_decline",
+  "Create Custom Quotes": "quotes:create",
+  "Manage Promotions": "discounts:manage",
+  "Manage Staff Accounts": "staff:manage",
+  "View Financial Analytics": "financials:view",
+  "View Audit Logs": "audit:view",
+  "Edit Platform Configuration": "config:edit",
+};
+
 /**
  * Middleware: requirePermission
  * Requires authenticated user to have a specific permission,
  * with super_operator holding universal override.
  *
- * @param {string} permissionId Permission name (e.g. 'orders:read', 'catalog:write')
+ * @param {string} permissionId Permission identifier or human name (e.g. 'orders:read' or 'View Orders')
  */
 function requirePermission(permissionId) {
+  const canonicalId = PERMISSION_ALIASES[permissionId] || permissionId;
+
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({
@@ -179,7 +200,7 @@ function requirePermission(permissionId) {
     }
 
     const userPermissions = Array.isArray(req.user.permissions) ? req.user.permissions : [];
-    if (!userPermissions.includes(permissionId)) {
+    if (!userPermissions.includes(canonicalId) && !userPermissions.includes(permissionId)) {
       return res.status(403).json({
         error: `Access denied. Missing required permission: "${permissionId}".`,
         code: "FORBIDDEN_PERMISSION",

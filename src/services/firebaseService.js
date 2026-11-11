@@ -132,6 +132,21 @@ async function verifyIdToken(idToken) {
   }
 
   if (!firebaseApp) {
+    if (CONFIG.nodeEnv === "development" && typeof idToken === "string" && idToken.startsWith("mock-")) {
+      const devTokens = {
+        "mock-super-admin-token": { uid: "dev_super_raghav", phone_number: "+919811000001" },
+        "mock-artist-divya-token": { uid: "dev_divya_artist", phone_number: "+919811000002" },
+        "mock-staff-token": { uid: "dev_staff_priya", phone_number: "+919811000003" },
+      };
+      if (devTokens[idToken]) {
+        return {
+          uid: devTokens[idToken].uid,
+          phone_number: devTokens[idToken].phone_number,
+          auth_time: Math.floor(Date.now() / 1000),
+        };
+      }
+    }
+
     const err = new Error("Authentication service is not configured. Please contact support.");
     err.code = "AUTH_SERVICE_UNCONFIGURED";
     err.statusCode = 503;
