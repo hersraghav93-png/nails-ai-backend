@@ -59,11 +59,30 @@ const CONFIG = {
     connectionTimeoutMs: parseInt(process.env.DB_CONNECTION_TIMEOUT_MS || "5000", 10),
     isConfigured: Boolean(process.env.DATABASE_URL || process.env.PGPASSWORD || process.env.PGUSER),
   },
+  // Firebase Authentication (Phase 1C)
+  firebase: {
+    projectId: process.env.FIREBASE_PROJECT_ID || "",
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL || "",
+    privateKey: (() => {
+      let key = process.env.FIREBASE_PRIVATE_KEY || "";
+      if (key.startsWith('"') && key.endsWith('"')) {
+        key = key.slice(1, -1);
+      }
+      return key.replace(/\\n/g, "\n");
+    })(),
+    serviceAccountPath: process.env.FIREBASE_SERVICE_ACCOUNT_PATH || "",
+    isConfigured: Boolean(
+      process.env.FIREBASE_PROJECT_ID &&
+        ((process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) ||
+          process.env.FIREBASE_SERVICE_ACCOUNT_PATH)
+    ),
+  },
 };
 
 console.log(`⚙️  [Config Verification] Loaded configuration (env: ${CONFIG.nodeEnv}).`);
 console.log(`⚙️  [Config Verification] Active Gemini Model: "${CONFIG.geminiModel}" (from process.env.GEMINI_MODEL: "${process.env.GEMINI_MODEL || 'default'}")`);
 console.log(`⚙️  [Config Verification] Resolved Frontend Path: "${CONFIG.frontendPath}" (Exists: ${fs.existsSync(CONFIG.frontendPath)})`);
 console.log(`⚙️  [Config Verification] Database Target: ${CONFIG.database.host}:${CONFIG.database.port}/${CONFIG.database.database} (SSL: ${Boolean(CONFIG.database.ssl)}, Configured: ${CONFIG.database.isConfigured})`);
+console.log(`⚙️  [Config Verification] Firebase Auth Configured: ${CONFIG.firebase.isConfigured} (Project: "${CONFIG.firebase.projectId || 'none'}")`);
 
 module.exports = CONFIG;

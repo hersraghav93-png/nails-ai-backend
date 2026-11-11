@@ -10,7 +10,10 @@
     "migrate": "node scripts/migrate.js --up",
     "migrate:status": "node scripts/migrate.js --status",
     "verify:staging": "node scripts/verifyStagingIntegration.js",
-    "test": "node scripts/testBackend.js"
+    "provision:admin": "node scripts/provisionAdmin.js",
+    "test:unit": "node scripts/testBackend.js",
+    "test:auth": "node scripts/testAuth.js",
+    "test": "node scripts/testBackend.js && node scripts/testAuth.js"
   },
   "keywords": [
     "ai",
@@ -29,6 +32,7 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "firebase-admin": "^14.5.0",
     "pg": "^8.23.1"
   }
 }

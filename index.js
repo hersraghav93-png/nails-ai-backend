@@ -10,6 +10,9 @@ const cors = require("cors");
 const CONFIG = require("./src/config");
 const { initAiService } = require("./src/services/aiService");
 const chatRouter = require("./src/routes/chatRoute");
+const authRouter = require("./src/routes/authRoute");
+const customerRouter = require("./src/routes/customerRoute");
+const adminRouter = require("./src/routes/adminRoute");
 
 const { closePool } = require("./src/db/pool");
 
@@ -24,6 +27,9 @@ initAiService();
 
 // 3. Mount Application Routes
 app.use("/", chatRouter);
+app.use("/api/auth", authRouter);
+app.use("/api/customer", customerRouter);
+app.use("/api/admin", adminRouter);
 
 // 4. Start Server (if executed directly)
 let server;
@@ -31,10 +37,13 @@ if (require.main === module) {
   server = app.listen(CONFIG.port, () => {
     console.log(`\n🚀 [Nails by Divya Server] Running on http://localhost:${CONFIG.port}`);
     console.log(`🔗 [API Endpoints]:`);
-    console.log(`   • GET  /                 -> Health Check (Root)`);
-    console.log(`   • GET  /health           -> Detailed Subsystem Health`);
-    console.log(`   • POST /chat             -> Grounded AI Customer Support`);
-    console.log(`   • POST /rebuild-knowledge-> Dynamic Website Re-Scan & Re-Index\n`);
+    console.log(`   • GET  /                  -> Health Check (Root)`);
+    console.log(`   • GET  /health            -> Detailed Subsystem Health`);
+    console.log(`   • POST /chat              -> Grounded AI Customer Support`);
+    console.log(`   • POST /rebuild-knowledge -> Dynamic Website Re-Scan & Re-Index`);
+    console.log(`   • GET  /api/auth/me       -> Authenticated Customer Identity`);
+    console.log(`   • /api/customer/*         -> Profile & Address Management`);
+    console.log(`   • /api/admin/*            -> Protected Admin & Operational Metrics\n`);
   });
 }
 

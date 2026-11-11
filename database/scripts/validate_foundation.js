@@ -62,7 +62,7 @@ const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf-8'));
 
 assert(manifest.project === 'Nails by Divya', 'Manifest project name matches');
 assert(manifest.target_engine === 'PostgreSQL 15+', 'Target engine is PostgreSQL 15+');
-assert(manifest.migrations.length === 1, 'Migration count is 1');
+assert(manifest.migrations.length === 2, 'Migration count is 2 (001_initial_schema, 002_add_firebase_uid)');
 assert(manifest.seeds.length === 5, 'Seed count is 5');
 
 manifest.migrations.forEach(m => {
@@ -87,13 +87,12 @@ manifest.seeds.forEach(s => {
 // TEST SUITE 2: TRANSACTION BOUNDARIES (FIX I3)
 // -----------------------------------------------------------------------------
 console.log('\nSUITE 2: Transaction Boundaries (Fix I3)');
-const ddlPath = path.join(MIGRATIONS_DIR, '001_initial_schema.sql');
-const ddlContent = fs.readFileSync(ddlPath, 'utf-8');
-const rollbackPath = path.join(MIGRATIONS_DIR, '001_initial_schema_rollback.sql');
-const rollbackContent = fs.readFileSync(rollbackPath, 'utf-8');
-
-assert(/^BEGIN;/m.test(ddlContent) && /COMMIT;$/m.test(ddlContent.trim()), 'Migration 001 is enclosed in atomic BEGIN ... COMMIT block');
-assert(/^BEGIN;/m.test(rollbackContent) && /COMMIT;$/m.test(rollbackContent.trim()), 'Rollback 001 is enclosed in atomic BEGIN ... COMMIT block');
+manifest.migrations.forEach(m => {
+  const upContent = fs.readFileSync(path.join(BASE_DIR, m.up_file), 'utf-8');
+  const downContent = fs.readFileSync(path.join(BASE_DIR, m.down_file), 'utf-8');
+  assert(/^BEGIN;/m.test(upContent) && /COMMIT;$/m.test(upContent.trim()), `Migration ${m.id} is enclosed in atomic BEGIN ... COMMIT block`);
+  assert(/^BEGIN;/m.test(downContent) && /COMMIT;$/m.test(downContent.trim()), `Rollback ${m.id} is enclosed in atomic BEGIN ... COMMIT block`);
+});
 
 manifest.seeds.forEach(s => {
   const content = fs.readFileSync(path.join(BASE_DIR, s.file), 'utf-8');
@@ -104,6 +103,8 @@ manifest.seeds.forEach(s => {
 // TEST SUITE 3: DDL STRUCTURE & SCHEMA INVENTORY (50 TABLES)
 // -----------------------------------------------------------------------------
 console.log('\nSUITE 3: DDL Structure & Schema Inventory (50 Tables)');
+const ddlPath = path.join(MIGRATIONS_DIR, '001_initial_schema.sql');
+const ddlContent = fs.readFileSync(ddlPath, 'utf-8');
 const tableMatches = [...ddlContent.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z0-9_]+)\s*\(/gi)];
 const tableNames = tableMatches.map(m => m[1].toLowerCase());
 
@@ -309,6 +310,8 @@ assert(faqNumberMatches && faqNumberMatches.length === 31, `Seed 004 contains ex
 // TEST SUITE 13: ROLLBACK COMPLETENESS & REVERSE DROP ORDER
 // -----------------------------------------------------------------------------
 console.log('\nSUITE 13: Rollback Completeness & Reverse Drop Order');
+const rollbackPath = path.join(MIGRATIONS_DIR, '001_initial_schema_rollback.sql');
+const rollbackContent = fs.readFileSync(rollbackPath, 'utf-8');
 const dropMatches = [...rollbackContent.matchAll(/DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?([a-z0-9_]+)/gi)];
 const droppedTables = dropMatches.map(m => m[1].toLowerCase());
 
