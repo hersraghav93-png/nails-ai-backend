@@ -146,8 +146,8 @@ async function runSuite() {
     let corsCalled = false;
     let corsError = null;
 
-    // 1. Whitelisted domain
-    const mockReqAllowed = { headers: { origin: "https://nailsbydivya.com" }, method: "GET" };
+    // 1. Whitelisted domain (verified business domain is nailsbydivya.store)
+    const mockReqAllowed = { headers: { origin: "https://nailsbydivya.store" }, method: "GET" };
     const mockResAllowed = {
       getHeader: () => {},
       setHeader: () => {},
@@ -159,18 +159,18 @@ async function runSuite() {
     assert.strictEqual(corsCalled, true, "CORS callback must execute");
     assert.strictEqual(corsError, null, "Whitelisted origin must not produce CORS error");
 
-    // 2. Untrusted third-party domain
+    // 2. Untrusted third-party domain (and legacy .com domain)
     let untrustedBlocked = false;
-    const mockReqBlocked = { headers: { origin: "https://malicious-nail-site.com" }, method: "GET" };
+    const mockReqBlocked = { headers: { origin: "https://nailsbydivya.com" }, method: "GET" };
     corsMiddleware(mockReqBlocked, mockResAllowed, (err) => {
       if (err && err.message.includes("CORS policy")) {
         untrustedBlocked = true;
       }
     });
-    assert.strictEqual(untrustedBlocked, true, "Untrusted origin must be rejected with CORS violation");
+    assert.strictEqual(untrustedBlocked, true, "Untrusted/legacy .com origin must be rejected with CORS violation");
 
     process.env.NODE_ENV = prevEnv;
-    pass("CORS enforces strict whitelist on production: permits nailsbydivya.com, rejects untrusted origins");
+    pass("CORS enforces strict whitelist on production: permits nailsbydivya.store, rejects legacy .com and untrusted origins");
   } catch (e) { fail("CORS origin enforcement", e); }
 
   // ---------------------------------------------------------------------------

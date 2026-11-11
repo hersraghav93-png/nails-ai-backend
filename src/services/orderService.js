@@ -18,6 +18,7 @@
 const crypto = require("crypto");
 const { getPool, query } = require("../db/pool");
 const { calculateItemPricing, calculateCartTotals } = require("./pricingEngine");
+const { queueNotification } = require("./notifications/notificationService");
 
 // Allowed status values matching database check constraints
 const ALLOWED_ORDER_STATUSES = [
@@ -490,6 +491,30 @@ async function createOrderFromCart({
 
     await client.query("COMMIT;");
 
+    // Queue customer order confirmation notification
+    try {
+      const itemsSummary = createdItems.map((i) => `${i.quantity}x ${i.product_name}`).join(", ");
+      const addr = order.shipping_address || {};
+      const addrStr = `${addr.address_line1 || ""}, ${addr.city || ""}, PIN ${addr.postal_code || ""}`;
+
+      await queueNotification({
+        channel: "whatsapp",
+        recipientPhone: order.customer_phone,
+        templateKey: "ORDER_CONFIRMED",
+        variables: {
+          customerName: order.customer_name,
+          orderNumber: order.order_number,
+          orderId: order.id,
+          itemsSummary,
+          totalAmount: order.total_amount,
+          deliveryAddress: addrStr,
+        },
+        idempotencyKey: `order_${order.id}_confirmed`,
+      });
+    } catch (notifErr) {
+      console.warn(`⚠️ [Order Notification Error] Order ${order.id}: ${notifErr.message}`);
+    }
+
     return {
       order: {
         id: order.id,
@@ -604,6 +629,27 @@ async function getOrderById(orderId, authContext = {}) {
     [orderId]
   );
 
+  // Retrieve shipment information
+  const shipmentRes = await query(
+    `SELECT id, courier_name, tracking_number, tracking_url, dispatched_at, delivered_at, created_at
+     FROM shipments
+     WHERE order_id = $1
+     ORDER BY created_at DESC
+     LIMIT 1;`,
+    [orderId]
+  );
+
+  // Retrieve related communication history
+  const notificationsRes = await query(
+    `SELECT id, channel, template_name, status, retry_count, scheduled_for, created_at,
+            template_variables->>'__manualWaLink' AS manual_wa_link
+     FROM notification_jobs
+     WHERE template_variables->>'orderId' = $1 OR template_variables->>'orderNumber' = $2
+     ORDER BY created_at DESC
+     LIMIT 10;`,
+    [orderId, order.order_number]
+  );
+
   return {
     order: {
       id: order.id,
@@ -622,6 +668,11 @@ async function getOrderById(orderId, authContext = {}) {
       paymentStatus: order.payment_status,
       fulfilmentStatus: order.fulfilment_status,
       customerNotes: order.customer_notes,
+      courierName: shipmentRes.rows[0] ? shipmentRes.rows[0].courier_name : null,
+      trackingNumber: shipmentRes.rows[0] ? shipmentRes.rows[0].tracking_number : null,
+      trackingUrl: shipmentRes.rows[0] ? shipmentRes.rows[0].tracking_url : null,
+      dispatchedAt: shipmentRes.rows[0] ? shipmentRes.rows[0].dispatched_at : null,
+      deliveredAt: shipmentRes.rows[0] ? shipmentRes.rows[0].delivered_at : null,
       createdAt: order.created_at,
       updatedAt: order.updated_at,
     },
@@ -643,6 +694,24 @@ async function getOrderById(orderId, authContext = {}) {
       actorType: sh.actor_type,
       notes: sh.notes,
       createdAt: sh.created_at,
+    })),
+    shipment: shipmentRes.rows[0] ? {
+      id: shipmentRes.rows[0].id,
+      courierName: shipmentRes.rows[0].courier_name,
+      trackingNumber: shipmentRes.rows[0].tracking_number,
+      trackingUrl: shipmentRes.rows[0].tracking_url,
+      dispatchedAt: shipmentRes.rows[0].dispatched_at,
+      deliveredAt: shipmentRes.rows[0].delivered_at,
+    } : null,
+    notifications: notificationsRes.rows.map((n) => ({
+      id: n.id,
+      channel: n.channel,
+      templateName: n.template_name,
+      status: n.status,
+      retryCount: n.retry_count,
+      scheduledFor: n.scheduled_for,
+      createdAt: n.created_at,
+      manualWaLink: n.manual_wa_link,
     })),
   };
 }
@@ -813,6 +882,23 @@ async function cancelOrder(orderId, authContext = {}) {
 
     await client.query("COMMIT;");
 
+    // Queue cancellation notification
+    try {
+      await queueNotification({
+        recipientPhone: order.customer_phone,
+        templateKey: "ORDER_CANCELLED",
+        variables: {
+          customerName: order.customer_name,
+          orderNumber: order.order_number,
+          orderId: order.id,
+          cancellationReason: cancelNote,
+        },
+        idempotencyKey: `order_${order.id}_cancelled`,
+      });
+    } catch (notifErr) {
+      console.warn(`⚠️ [Order Notification Error] Order ${order.id}: ${notifErr.message}`);
+    }
+
     return getOrderById(orderId, {
       userId,
       sessionToken,
@@ -941,7 +1027,25 @@ async function adminListOrders(filters = {}) {
  * @returns {Promise<object>} Updated order details
  */
 async function adminUpdateOrderStatus(orderId, updateData, adminUser, ipAddress = null) {
-  const { orderStatus, fulfilmentStatus, notes } = updateData;
+  const {
+    orderStatus,
+    fulfilmentStatus,
+    courierName,
+    courier_name,
+    trackingNumber,
+    tracking_number,
+    trackingUrl,
+    tracking_url,
+    dispatchedAt,
+    dispatched_at,
+    notes,
+    notifyCustomer = true,
+  } = updateData;
+
+  const resolvedCourier = courierName || courier_name || null;
+  const resolvedTracking = trackingNumber || tracking_number || null;
+  const resolvedTrackingUrl = trackingUrl || tracking_url || null;
+  const resolvedDispatchedAt = dispatchedAt || dispatched_at || null;
 
   if (orderStatus && !ALLOWED_ORDER_STATUSES.includes(orderStatus)) {
     const err = new Error(
@@ -990,6 +1094,56 @@ async function adminUpdateOrderStatus(orderId, updateData, adminUser, ipAddress 
        WHERE id = $3;`,
       [newOrderStatus, newFulfilmentStatus, orderId]
     );
+
+    // Shipment record upsert if courier, tracking, or DISPATCHED status is provided
+    let activeShipment = null;
+    if (resolvedCourier || resolvedTracking || fulfilmentStatus === "DISPATCHED") {
+      const existingShipRes = await client.query(
+        `SELECT id FROM shipments WHERE order_id = $1 ORDER BY created_at DESC LIMIT 1 FOR UPDATE;`,
+        [orderId]
+      );
+
+      const dispatchTime = resolvedDispatchedAt ? new Date(resolvedDispatchedAt) : (fulfilmentStatus === "DISPATCHED" ? new Date() : null);
+
+      if (existingShipRes.rows.length > 0) {
+        const updateShipRes = await client.query(
+          `UPDATE shipments
+           SET courier_name = COALESCE($1, courier_name),
+               tracking_number = COALESCE($2, tracking_number),
+               tracking_url = COALESCE($3, tracking_url),
+               dispatched_at = COALESCE($4, dispatched_at)
+           WHERE id = $5
+           RETURNING *;`,
+          [
+            resolvedCourier,
+            resolvedTracking,
+            resolvedTrackingUrl,
+            dispatchTime,
+            existingShipRes.rows[0].id,
+          ]
+        );
+        activeShipment = updateShipRes.rows[0];
+      } else {
+        const insertShipRes = await client.query(
+          `INSERT INTO shipments (
+             order_id,
+             courier_name,
+             tracking_number,
+             tracking_url,
+             dispatched_at
+           ) VALUES ($1, $2, $3, $4, COALESCE($5, CURRENT_TIMESTAMP))
+           RETURNING *;`,
+          [
+            orderId,
+            resolvedCourier,
+            resolvedTracking,
+            resolvedTrackingUrl,
+            dispatchTime,
+          ]
+        );
+        activeShipment = insertShipRes.rows[0];
+      }
+    }
 
     // Record order status history if changed
     if (orderStatus && orderStatus !== order.order_status) {
@@ -1064,6 +1218,8 @@ async function adminUpdateOrderStatus(orderId, updateData, adminUser, ipAddress 
           updated: {
             order_status: newOrderStatus,
             fulfilment_status: newFulfilmentStatus,
+            courier: resolvedCourier,
+            tracking: resolvedTracking,
           },
           notes: notes || null,
         }),
@@ -1072,6 +1228,82 @@ async function adminUpdateOrderStatus(orderId, updateData, adminUser, ipAddress 
     );
 
     await client.query("COMMIT;");
+
+    // Queue appropriate customer notifications
+    if (notifyCustomer !== false) {
+      try {
+        if (orderStatus && orderStatus !== order.order_status) {
+          if (orderStatus === "IN_PRODUCTION") {
+            await queueNotification({
+              recipientPhone: order.customer_phone,
+              templateKey: "ORDER_IN_PRODUCTION",
+              variables: {
+                customerName: order.customer_name,
+                orderNumber: order.order_number,
+                orderId: order.id,
+              },
+              idempotencyKey: `order_${order.id}_in_prod`,
+            });
+          } else if (orderStatus === "CANCELLED") {
+            await queueNotification({
+              recipientPhone: order.customer_phone,
+              templateKey: "ORDER_CANCELLED",
+              variables: {
+                customerName: order.customer_name,
+                orderNumber: order.order_number,
+                orderId: order.id,
+                cancellationReason: notes || "Order cancelled by studio administration.",
+              },
+              idempotencyKey: `order_${order.id}_cancelled`,
+            });
+          }
+        }
+
+        if (fulfilmentStatus && fulfilmentStatus !== order.fulfilment_status) {
+          if (fulfilmentStatus === "READY_FOR_DISPATCH") {
+            await queueNotification({
+              recipientPhone: order.customer_phone,
+              templateKey: "ORDER_READY_FOR_DISPATCH",
+              variables: {
+                customerName: order.customer_name,
+                orderNumber: order.order_number,
+                orderId: order.id,
+              },
+              idempotencyKey: `order_${order.id}_ready_dispatch`,
+            });
+          } else if (fulfilmentStatus === "DISPATCHED") {
+            const ship = activeShipment || {};
+            await queueNotification({
+              recipientPhone: order.customer_phone,
+              templateKey: "ORDER_DISPATCHED",
+              variables: {
+                customerName: order.customer_name,
+                orderNumber: order.order_number,
+                orderId: order.id,
+                courierName: ship.courier_name || resolvedCourier || "Express Courier",
+                trackingNumber: ship.tracking_number || resolvedTracking || "Pending Assignment",
+                trackingUrl: ship.tracking_url || resolvedTrackingUrl || null,
+                dispatchedDate: ship.dispatched_at ? new Date(ship.dispatched_at).toLocaleDateString("en-IN") : new Date().toLocaleDateString("en-IN"),
+              },
+              idempotencyKey: `order_${order.id}_dispatched_${ship.tracking_number || Date.now()}`,
+            });
+          } else if (fulfilmentStatus === "DELIVERED") {
+            await queueNotification({
+              recipientPhone: order.customer_phone,
+              templateKey: "ORDER_DELIVERED",
+              variables: {
+                customerName: order.customer_name,
+                orderNumber: order.order_number,
+                orderId: order.id,
+              },
+              idempotencyKey: `order_${order.id}_delivered`,
+            });
+          }
+        }
+      } catch (notifErr) {
+        console.warn(`⚠️ [Order Notification Error] Order ${order.id}: ${notifErr.message}`);
+      }
+    }
 
     return getOrderById(orderId, { isAdmin: true, skipAuthCheck: true });
   } catch (err) {

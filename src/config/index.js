@@ -102,6 +102,17 @@ const CONFIG = {
           process.env.FIREBASE_SERVICE_ACCOUNT_PATH)
     ),
   },
+  // Customer Communications & WhatsApp Configuration (Phase 3A)
+  notifications: {
+    whatsapp: {
+      provider: process.env.WHATSAPP_PROVIDER || "meta",
+      apiToken: process.env.WHATSAPP_API_TOKEN || "",
+      phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || "",
+      businessAccountId: process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || "",
+      isConfigured: Boolean(process.env.WHATSAPP_API_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID),
+      studioPhoneNumber: process.env.STUDIO_WHATSAPP_PHONE || "+919811000001",
+    },
+  },
 };
 
 console.log(`⚙️  [Config Verification] Loaded configuration (env: ${CONFIG.nodeEnv}).`);

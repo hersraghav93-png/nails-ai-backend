@@ -63,6 +63,10 @@ const {
   listBusinessSettings,
   listAuditLogs,
 } = require("../services/adminService");
+const {
+  listNotifications,
+  retryNotification,
+} = require("../services/notifications/notificationService");
 
 const router = express.Router();
 
@@ -192,14 +196,20 @@ router.get("/orders/:orderId", requirePermission("View Orders"), async (req, res
 router.patch("/orders/:orderId/status", requirePermission("Update Order Fulfillment"), handleUpdateOrderStatus);
 router.put("/orders/:orderId/status", requirePermission("Update Order Fulfillment"), handleUpdateOrderStatus);
 router.post("/orders/:orderId/status", requirePermission("Update Order Fulfillment"), handleUpdateOrderStatus);
+router.post("/orders/:orderId/fulfilment", requirePermission("Update Order Fulfillment"), handleUpdateOrderStatus);
 
 async function handleUpdateOrderStatus(req, res) {
   try {
     const updated = await adminUpdateOrderStatus(
       req.params.orderId,
       {
-        orderStatus: req.body && req.body.order_status,
-        fulfilmentStatus: req.body && req.body.fulfilment_status,
+        orderStatus: req.body && (req.body.order_status || req.body.orderStatus),
+        fulfilmentStatus: req.body && (req.body.fulfilment_status || req.body.fulfilmentStatus),
+        courierName: req.body && (req.body.courier_name || req.body.courierName),
+        trackingNumber: req.body && (req.body.tracking_number || req.body.trackingNumber),
+        trackingUrl: req.body && (req.body.tracking_url || req.body.trackingUrl),
+        dispatchedAt: req.body && (req.body.dispatched_at || req.body.dispatchedAt),
+        notifyCustomer: req.body && (req.body.notify_customer !== undefined ? req.body.notify_customer : req.body.notifyCustomer),
         notes: req.body && req.body.notes,
       },
       req.user,
@@ -745,6 +755,63 @@ router.get("/audit-logs", requirePermission("View Audit Logs"), async (req, res)
     return res.status(status).json({
       error: err.message || "Failed to list audit logs.",
       code: "ADMIN_AUDIT_LOGS_FAILED",
+    });
+  }
+});
+
+// =============================================================================
+// 8. COMMUNICATIONS & NOTIFICATIONS TELEMETRY
+// =============================================================================
+
+/**
+ * GET /api/admin/communications/notifications
+ * Requires 'View Orders' permission.
+ * Lists notification queue, provider delivery status, and operator fallback WhatsApp links.
+ */
+router.get("/communications/notifications", requirePermission("View Orders"), async (req, res) => {
+  try {
+    const filters = {
+      status: req.query.status,
+      channel: req.query.channel,
+      search: req.query.search,
+      limit: req.query.limit,
+      offset: req.query.offset,
+    };
+
+    const result = await listNotifications(filters);
+
+    return res.json({
+      status: "success",
+      ...result,
+    });
+  } catch (err) {
+    const status = err.statusCode || 500;
+    return res.status(status).json({
+      error: err.message || "Failed to retrieve notifications.",
+      code: "ADMIN_NOTIFICATIONS_FETCH_FAILED",
+    });
+  }
+});
+
+/**
+ * POST /api/admin/communications/notifications/:id/retry
+ * Requires 'Update Order Fulfillment' permission.
+ * Retries a failed or queued notification job immediately.
+ */
+router.post("/communications/notifications/:id/retry", requirePermission("Update Order Fulfillment"), async (req, res) => {
+  try {
+    const updatedJob = await retryNotification(req.params.id, req.user);
+
+    return res.json({
+      status: "success",
+      message: "Notification retry dispatched.",
+      notification: updatedJob,
+    });
+  } catch (err) {
+    const status = err.statusCode || 400;
+    return res.status(status).json({
+      error: err.message || "Failed to retry notification.",
+      code: "ADMIN_NOTIFICATION_RETRY_FAILED",
     });
   }
 });

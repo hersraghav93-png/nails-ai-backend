@@ -11,10 +11,16 @@
 const cors = require("cors");
 const CONFIG = require("../config");
 
-// Authorized production/staging domains
+// Authorized production domains (actual business website is nailsbydivya.store)
 const ALLOWED_PROD_ORIGINS = [
-  "https://nailsbydivya.com",
-  "https://www.nailsbydivya.com",
+  "https://nailsbydivya.store",
+  "https://www.nailsbydivya.store",
+];
+
+// Authorized staging / preview domains
+const ALLOWED_STAGING_ORIGINS = [
+  "https://staging.nailsbydivya.store",
+  "https://preview.nailsbydivya.store",
 ];
 
 // Authorized local development origins
@@ -27,46 +33,49 @@ const ALLOWED_DEV_ORIGINS = [
   "http://127.0.0.1:5000",
 ];
 
+function isOriginAllowed(origin, env) {
+  if (!origin) return true;
+
+  if (process.env.ALLOWED_ORIGINS) {
+    const customAllowed = process.env.ALLOWED_ORIGINS.split(",").map((s) => s.trim());
+    if (customAllowed.includes(origin)) return true;
+  }
+
+  const currentEnv = env || (CONFIG.isProduction() ? "production" : (CONFIG.isStaging() ? "staging" : "development"));
+
+  if (currentEnv === "production") {
+    return ALLOWED_PROD_ORIGINS.includes(origin);
+  }
+
+  if (currentEnv === "staging") {
+    return ALLOWED_STAGING_ORIGINS.includes(origin) || ALLOWED_PROD_ORIGINS.includes(origin);
+  }
+
+  if (
+    ALLOWED_DEV_ORIGINS.includes(origin) ||
+    origin.startsWith("http://localhost:") ||
+    origin.startsWith("http://127.0.0.1:") ||
+    origin === "null"
+  ) {
+    return true;
+  }
+
+  return currentEnv === "development";
+}
+
+function getCorsOriginValidator(env) {
+  return (origin, callback) => {
+    if (isOriginAllowed(origin, env)) {
+      return callback(null, true);
+    }
+    return callback(new Error(`CORS policy violation: origin "${origin}" is not authorized.`), false);
+  };
+}
+
 function getCorsMiddleware() {
   return cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (e.g. mobile apps, curl, server-to-server)
-      if (!origin) {
-        return callback(null, true);
-      }
-
-      // Check configured custom origins from environment
-      if (process.env.ALLOWED_ORIGINS) {
-        const customAllowed = process.env.ALLOWED_ORIGINS.split(",").map((s) => s.trim());
-        if (customAllowed.includes(origin)) {
-          return callback(null, true);
-        }
-      }
-
-      // In production/staging, enforce strict whitelist
-      if (CONFIG.isLiveEnvironment()) {
-        if (ALLOWED_PROD_ORIGINS.includes(origin)) {
-          return callback(null, true);
-        }
-        return callback(new Error(`CORS policy violation: origin "${origin}" is not authorized.`));
-      }
-
-      // In development/test, allow localhost origins or any local file origin
-      if (
-        ALLOWED_DEV_ORIGINS.includes(origin) ||
-        origin.startsWith("http://localhost:") ||
-        origin.startsWith("http://127.0.0.1:") ||
-        origin === "null" // for file:// protocol
-      ) {
-        return callback(null, true);
-      }
-
-      // Default allow in pure development
-      if (CONFIG.isDevelopment()) {
-        return callback(null, true);
-      }
-
-      return callback(new Error(`CORS policy: origin "${origin}" not allowed.`));
+      getCorsOriginValidator()(origin, callback);
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -77,6 +86,9 @@ function getCorsMiddleware() {
 
 module.exports = {
   getCorsMiddleware,
+  getCorsOriginValidator,
+  isOriginAllowed,
   ALLOWED_PROD_ORIGINS,
+  ALLOWED_STAGING_ORIGINS,
   ALLOWED_DEV_ORIGINS,
 };

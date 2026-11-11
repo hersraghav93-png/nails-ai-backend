@@ -18,6 +18,7 @@
 const crypto = require("crypto");
 const { getPool, query } = require("../db/pool");
 const { validateAndFormatPhone } = require("./orderService");
+const { queueNotification } = require("./notifications/notificationService");
 
 // Allowed booking status values from database check constraints
 const ALLOWED_BOOKING_STATUSES = [
@@ -596,6 +597,30 @@ async function createAppointmentRequest({
 
     await client.query("COMMIT;");
 
+    // Queue appointment request acknowledgement notification
+    try {
+      const addr = fullServiceAddressPayload || {};
+      const addrStr = `${addr.address_line1 || ""}, ${addr.city || ""}, PIN ${addr.postal_code || ""}`;
+
+      await queueNotification({
+        channel: "whatsapp",
+        recipientPhone: booking.customer_phone,
+        templateKey: "APPOINTMENT_REQUESTED",
+        variables: {
+          customerName: booking.customer_name,
+          bookingNumber: booking.booking_number,
+          bookingId: booking.id,
+          serviceName: service.name,
+          requestedDate: formatDateOnly(booking.requested_date),
+          requestedTimeSlot: booking.requested_time_slot,
+          serviceAddress: addrStr,
+        },
+        idempotencyKey: `booking_${booking.id}_requested`,
+      });
+    } catch (notifErr) {
+      console.warn(`⚠️ [Booking Notification Error] Booking ${booking.id}: ${notifErr.message}`);
+    }
+
     return {
       booking: formatBookingOutput(booking, fullServiceAddressPayload),
       claimSecret, // Returned to guest for future lookup / ownership verification
@@ -751,6 +776,17 @@ async function getAppointmentById(bookingId, authContext = {}) {
     [bookingId]
   );
 
+  // Retrieve related communication history
+  const notificationsRes = await query(
+    `SELECT id, channel, template_name, status, retry_count, scheduled_for, created_at,
+            template_variables->>'__manualWaLink' AS manual_wa_link
+     FROM notification_jobs
+     WHERE template_variables->>'bookingId' = $1 OR template_variables->>'bookingNumber' = $2
+     ORDER BY created_at DESC
+     LIMIT 10;`,
+    [bookingId, booking.booking_number]
+  );
+
   return {
     booking: formatBookingOutput(booking, addressObj),
     statusHistory: historyRes.rows.map((h) => ({
@@ -760,6 +796,16 @@ async function getAppointmentById(bookingId, authContext = {}) {
       actorType: h.actor_type,
       notes: h.notes,
       createdAt: h.created_at,
+    })),
+    notifications: notificationsRes.rows.map((n) => ({
+      id: n.id,
+      channel: n.channel,
+      templateName: n.template_name,
+      status: n.status,
+      retryCount: n.retry_count,
+      scheduledFor: n.scheduled_for,
+      createdAt: n.created_at,
+      manualWaLink: n.manual_wa_link,
     })),
   };
 }
@@ -897,6 +943,24 @@ async function cancelAppointmentRequest(bookingId, authContext = {}) {
     );
 
     await client.query("COMMIT;");
+
+    // Queue cancellation notification
+    try {
+      await queueNotification({
+        channel: "whatsapp",
+        recipientPhone: booking.customer_phone,
+        templateKey: "APPOINTMENT_CANCELLED",
+        variables: {
+          customerName: booking.customer_name,
+          bookingNumber: booking.booking_number,
+          bookingId: booking.id,
+          cancellationReason: cancelNote,
+        },
+        idempotencyKey: `booking_${booking.id}_cancelled_${Date.now()}`,
+      });
+    } catch (notifErr) {
+      console.warn(`[bookingService] Failed to queue cancellation notification for booking ${booking.id}:`, notifErr.message);
+    }
 
     return getAppointmentById(bookingId, { isAdmin: true, skipAuthCheck: true });
   } catch (err) {
@@ -1076,6 +1140,32 @@ async function confirmAppointmentRequest(bookingId, confirmData, adminUser, ipAd
 
     await client.query("COMMIT;");
 
+    // Queue confirmation notification
+    try {
+      const svcRes = await query(`SELECT name FROM services WHERE id = $1;`, [booking.service_id]);
+      const serviceName = svcRes.rows.length > 0 ? svcRes.rows[0].name : "At-Home Nail Service";
+      const addrObj = typeof booking.service_address === "string" ? JSON.parse(booking.service_address) : (booking.service_address || {});
+      const addrStr = `${addrObj.address_line1 || ""}, ${addrObj.city || ""}, PIN ${addrObj.postal_code || ""}`;
+
+      await queueNotification({
+        channel: "whatsapp",
+        recipientPhone: booking.customer_phone,
+        templateKey: "APPOINTMENT_CONFIRMED",
+        variables: {
+          customerName: booking.customer_name,
+          bookingNumber: booking.booking_number,
+          bookingId: booking.id,
+          serviceName,
+          confirmedDate: startTime.toLocaleDateString("en-IN"),
+          confirmedSlot: `${startTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} - ${endTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+          serviceAddress: addrStr,
+        },
+        idempotencyKey: `booking_${booking.id}_confirmed`,
+      });
+    } catch (notifErr) {
+      console.warn(`[bookingService] Failed to queue confirmation notification for booking ${booking.id}:`, notifErr.message);
+    }
+
     return getAppointmentById(bookingId, { isAdmin: true, skipAuthCheck: true });
   } catch (err) {
     await client.query("ROLLBACK;");
@@ -1209,6 +1299,26 @@ async function proposeAlternativeSlot(bookingId, proposalData, adminUser, ipAddr
 
     await client.query("COMMIT;");
 
+    // Queue alternative proposal notification
+    try {
+      await queueNotification({
+        channel: "whatsapp",
+        recipientPhone: booking.customer_phone,
+        templateKey: "APPOINTMENT_ALTERNATIVE_PROPOSED",
+        variables: {
+          customerName: booking.customer_name,
+          bookingNumber: booking.booking_number,
+          bookingId: booking.id,
+          proposedDate: validatedAltDate,
+          proposedSlot: validatedAltSlot,
+          rescheduleReason: rescheduleReason || "Studio schedule conflict",
+        },
+        idempotencyKey: `booking_${booking.id}_alt_proposed_${validatedAltDate}_${validatedAltSlot}`,
+      });
+    } catch (notifErr) {
+      console.warn(`[bookingService] Failed to queue alternative proposal notification for booking ${booking.id}:`, notifErr.message);
+    }
+
     const updated = await getAppointmentById(bookingId, { isAdmin: true, skipAuthCheck: true });
     return {
       ...updated,
@@ -1306,6 +1416,24 @@ async function declineAppointmentRequest(bookingId, declineData, adminUser, ipAd
     );
 
     await client.query("COMMIT;");
+
+    // Queue decline notification
+    try {
+      await queueNotification({
+        channel: "whatsapp",
+        recipientPhone: booking.customer_phone,
+        templateKey: "APPOINTMENT_DECLINED",
+        variables: {
+          customerName: booking.customer_name,
+          bookingNumber: booking.booking_number,
+          bookingId: booking.id,
+          declineReason: reason || notes || "Outside service coverage perimeter",
+        },
+        idempotencyKey: `booking_${booking.id}_declined`,
+      });
+    } catch (notifErr) {
+      console.warn(`[bookingService] Failed to queue decline notification for booking ${booking.id}:`, notifErr.message);
+    }
 
     return getAppointmentById(bookingId, { isAdmin: true, skipAuthCheck: true });
   } catch (err) {
