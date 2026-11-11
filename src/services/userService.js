@@ -688,6 +688,7 @@ async function provisionAdminAccount({
   roleId,
   assignedByUserId = null,
   allowRoleChange = false,
+  devAllowUnverified = false,
 }) {
   if (!firebaseUid || typeof firebaseUid !== "string" || !firebaseUid.trim()) {
     throw new Error("firebaseUid is required for administrator provisioning.");
@@ -705,9 +706,18 @@ async function provisionAdminAccount({
   const cleanUid = firebaseUid.trim();
   const cleanPhone = phone.trim();
 
-  // 1. Cryptographically verify against Firebase Admin
-  // Fails closed if Firebase Admin credentials are not in .env
-  await verifyFirebaseAdminUser(cleanUid, cleanPhone);
+  // 1. Remote verification against Firebase Admin
+  // Strictly mandatory in production; permitted to skip only in development with explicit dev flag
+  if (devAllowUnverified) {
+    if (process.env.NODE_ENV !== "development" && process.env.NODE_ENV !== "test") {
+      throw new Error("devAllowUnverified is strictly forbidden outside development mode (NODE_ENV must be 'development' or 'test').");
+    }
+    console.warn(`⚠️  [DEV ONLY] Skipping remote Firebase Auth verification for "${cleanUid}" because devAllowUnverified=true in development/test mode.`);
+  } else {
+    // Cryptographically verify against Firebase Admin
+    // Fails closed if Firebase Admin credentials are not in .env
+    await verifyFirebaseAdminUser(cleanUid, cleanPhone);
+  }
 
   return withTransaction(async (client) => {
     // 2. Check for separate conflicts between firebase_uid and phone
@@ -797,7 +807,28 @@ async function provisionAdminAccount({
       [userId, roleId, assignedByUserId]
     );
 
-    // 6. Retrieve complete provisioned record
+    // 6. Record in immutable audit log
+    await client.query(
+      `INSERT INTO audit_logs (
+         actor_id, actor_role, action, target_entity, target_id, diff, ip_address
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+      [
+        assignedByUserId || userId,
+        assignedByUserId ? "super_operator" : "system",
+        "ADMIN_ACCOUNT_PROVISIONED",
+        "user_roles",
+        userId,
+        JSON.stringify({
+          firebase_uid: cleanUid,
+          phone: cleanPhone,
+          display_name: displayName.trim(),
+          role_id: roleId,
+        }),
+        "127.0.0.1",
+      ]
+    );
+
+    // 7. Retrieve complete provisioned record
     const adminDetailsRes = await client.query(
       `SELECT u.id, u.firebase_uid, u.phone, ap.display_name, r.id AS role_id, r.name AS role_name
        FROM users u

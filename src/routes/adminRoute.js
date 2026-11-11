@@ -189,7 +189,11 @@ router.get("/orders/:orderId", requirePermission("View Orders"), async (req, res
  * Requires 'Update Order Fulfillment' permission.
  * Updates order and/or fulfilment status, writes audit log, and records status history.
  */
-router.patch("/orders/:orderId/status", requirePermission("Update Order Fulfillment"), async (req, res) => {
+router.patch("/orders/:orderId/status", requirePermission("Update Order Fulfillment"), handleUpdateOrderStatus);
+router.put("/orders/:orderId/status", requirePermission("Update Order Fulfillment"), handleUpdateOrderStatus);
+router.post("/orders/:orderId/status", requirePermission("Update Order Fulfillment"), handleUpdateOrderStatus);
+
+async function handleUpdateOrderStatus(req, res) {
   try {
     const updated = await adminUpdateOrderStatus(
       req.params.orderId,
@@ -214,7 +218,7 @@ router.patch("/orders/:orderId/status", requirePermission("Update Order Fulfillm
       code: err.code || "ADMIN_ORDER_UPDATE_FAILED",
     });
   }
-});
+}
 
 /**
  * POST /api/admin/orders/:orderId/cancel
@@ -306,7 +310,10 @@ router.get("/bookings/:bookingId", requirePermission("View Bookings"), async (re
  * Requires 'Confirm or Decline Bookings' permission.
  * Confirms an appointment request and locks in scheduled start and end times.
  */
-router.patch("/bookings/:bookingId/confirm", requirePermission("Confirm or Decline Bookings"), async (req, res) => {
+router.patch("/bookings/:bookingId/confirm", requirePermission("Confirm or Decline Bookings"), handleConfirmBooking);
+router.post("/bookings/:bookingId/confirm", requirePermission("Confirm or Decline Bookings"), handleConfirmBooking);
+
+async function handleConfirmBooking(req, res) {
   try {
     const result = await confirmAppointmentRequest(
       req.params.bookingId,
@@ -331,14 +338,17 @@ router.patch("/bookings/:bookingId/confirm", requirePermission("Confirm or Decli
       code: err.code || "ADMIN_CONFIRM_BOOKING_FAILED",
     });
   }
-});
+}
 
 /**
  * PATCH /api/admin/bookings/:bookingId/propose-slot
  * Requires 'Confirm or Decline Bookings' permission.
  * Proposes an alternative date & time window when the requested slot is unavailable.
  */
-router.patch("/bookings/:bookingId/propose-slot", requirePermission("Confirm or Decline Bookings"), async (req, res) => {
+router.patch("/bookings/:bookingId/propose-slot", requirePermission("Confirm or Decline Bookings"), handleProposeSlot);
+router.post("/bookings/:bookingId/propose-slot", requirePermission("Confirm or Decline Bookings"), handleProposeSlot);
+
+async function handleProposeSlot(req, res) {
   try {
     const result = await proposeAlternativeSlot(
       req.params.bookingId,
@@ -364,14 +374,19 @@ router.patch("/bookings/:bookingId/propose-slot", requirePermission("Confirm or 
       code: err.code || "ADMIN_PROPOSE_SLOT_FAILED",
     });
   }
-});
+}
 
 /**
  * PATCH /api/admin/bookings/:bookingId/reject
  * Requires 'Confirm or Decline Bookings' permission.
  * Declines an appointment request with an explicit reason.
  */
-router.patch("/bookings/:bookingId/reject", requirePermission("Confirm or Decline Bookings"), async (req, res) => {
+router.patch("/bookings/:bookingId/reject", requirePermission("Confirm or Decline Bookings"), handleDeclineBooking);
+router.post("/bookings/:bookingId/reject", requirePermission("Confirm or Decline Bookings"), handleDeclineBooking);
+router.patch("/bookings/:bookingId/decline", requirePermission("Confirm or Decline Bookings"), handleDeclineBooking);
+router.post("/bookings/:bookingId/decline", requirePermission("Confirm or Decline Bookings"), handleDeclineBooking);
+
+async function handleDeclineBooking(req, res) {
   try {
     const result = await declineAppointmentRequest(
       req.params.bookingId,
@@ -395,14 +410,17 @@ router.patch("/bookings/:bookingId/reject", requirePermission("Confirm or Declin
       code: err.code || "ADMIN_DECLINE_BOOKING_FAILED",
     });
   }
-});
+}
 
 /**
  * PATCH /api/admin/bookings/:bookingId/cancel
  * Requires 'Confirm or Decline Bookings' permission.
  * Cancels an appointment from the artist/studio side.
  */
-router.patch("/bookings/:bookingId/cancel", requirePermission("Confirm or Decline Bookings"), async (req, res) => {
+router.patch("/bookings/:bookingId/cancel", requirePermission("Confirm or Decline Bookings"), handleCancelBooking);
+router.post("/bookings/:bookingId/cancel", requirePermission("Confirm or Decline Bookings"), handleCancelBooking);
+
+async function handleCancelBooking(req, res) {
   try {
     const result = await cancelAppointmentRequest(req.params.bookingId, {
       userId: req.user.id,
@@ -422,14 +440,20 @@ router.patch("/bookings/:bookingId/cancel", requirePermission("Confirm or Declin
       code: err.code || "ADMIN_CANCEL_BOOKING_FAILED",
     });
   }
-});
+}
 
 /**
  * PATCH /api/admin/bookings/:bookingId/status
  * Requires 'Confirm or Decline Bookings' permission.
  * Updates appointment operational progress (e.g. IN_PROGRESS, COMPLETED).
  */
-router.patch("/bookings/:bookingId/status", requirePermission("Confirm or Decline Bookings"), async (req, res) => {
+router.patch("/bookings/:bookingId/status", requirePermission("Confirm or Decline Bookings"), handleUpdateBookingStatus);
+router.post("/bookings/:bookingId/status", requirePermission("Confirm or Decline Bookings"), handleUpdateBookingStatus);
+router.put("/bookings/:bookingId/status", requirePermission("Confirm or Decline Bookings"), handleUpdateBookingStatus);
+router.put("/bookings/:bookingId/progress", requirePermission("Confirm or Decline Bookings"), handleUpdateBookingStatus);
+router.post("/bookings/:bookingId/progress", requirePermission("Confirm or Decline Bookings"), handleUpdateBookingStatus);
+
+async function handleUpdateBookingStatus(req, res) {
   try {
     const result = await updateAppointmentStatus(
       req.params.bookingId,
@@ -453,7 +477,7 @@ router.patch("/bookings/:bookingId/status", requirePermission("Confirm or Declin
       code: err.code || "ADMIN_UPDATE_STATUS_FAILED",
     });
   }
-});
+}
 
 // =============================================================================
 // 4. CUSTOMER MANAGEMENT
@@ -543,11 +567,15 @@ router.get("/products", requirePermission("View Catalog"), async (req, res) => {
  * Requires 'Toggle Availability' permission.
  * Toggles product active status and records audit log.
  */
-router.patch("/products/:productId/availability", requirePermission("Toggle Availability"), async (req, res) => {
+router.patch("/products/:productId/availability", requirePermission("Toggle Availability"), handleToggleProductAvailability);
+router.post("/products/:productId/availability", requirePermission("Toggle Availability"), handleToggleProductAvailability);
+router.put("/products/:productId/availability", requirePermission("Toggle Availability"), handleToggleProductAvailability);
+
+async function handleToggleProductAvailability(req, res) {
   try {
     const result = await toggleProductAvailability(
       req.params.productId,
-      req.body && req.body.is_active,
+      req.body && (req.body.is_active !== undefined ? req.body.is_active : req.body.is_available),
       req.user,
       req.ip
     );
@@ -564,7 +592,7 @@ router.patch("/products/:productId/availability", requirePermission("Toggle Avai
       code: err.code || "ADMIN_PRODUCT_AVAILABILITY_FAILED",
     });
   }
-});
+}
 
 /**
  * GET /api/admin/services
@@ -593,11 +621,15 @@ router.get("/services", requirePermission("View Catalog"), async (req, res) => {
  * Requires 'Toggle Availability' permission.
  * Toggles service active status and records audit log.
  */
-router.patch("/services/:serviceId/availability", requirePermission("Toggle Availability"), async (req, res) => {
+router.patch("/services/:serviceId/availability", requirePermission("Toggle Availability"), handleToggleServiceAvailability);
+router.post("/services/:serviceId/availability", requirePermission("Toggle Availability"), handleToggleServiceAvailability);
+router.put("/services/:serviceId/availability", requirePermission("Toggle Availability"), handleToggleServiceAvailability);
+
+async function handleToggleServiceAvailability(req, res) {
   try {
     const result = await toggleServiceAvailability(
       req.params.serviceId,
-      req.body && req.body.is_active,
+      req.body && (req.body.is_active !== undefined ? req.body.is_active : req.body.is_available),
       req.user,
       req.ip
     );
@@ -614,7 +646,7 @@ router.patch("/services/:serviceId/availability", requirePermission("Toggle Avai
       code: err.code || "ADMIN_SERVICE_AVAILABILITY_FAILED",
     });
   }
-});
+}
 
 // =============================================================================
 // 6. STAFF ROLES & PERMISSIONS

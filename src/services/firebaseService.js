@@ -114,6 +114,16 @@ async function verifyIdToken(idToken) {
     throw err;
   }
 
+  // Strict production boundary: simulated or mock tokens are strictly forbidden in production
+  if (CONFIG.nodeEnv === "production" || process.env.NODE_ENV === "production") {
+    if (idToken.startsWith("mock-") || idToken.startsWith("demo_")) {
+      const err = new Error("Simulator tokens are strictly forbidden in production.");
+      err.code = "INVALID_TOKEN";
+      err.statusCode = 401;
+      throw err;
+    }
+  }
+
   // 1. In test runner environments, check if a controlled test verifier is active
   if (testTokenVerifier && isTestEnvironment()) {
     const verified = await testTokenVerifier(idToken);

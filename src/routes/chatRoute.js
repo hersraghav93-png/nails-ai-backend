@@ -62,10 +62,11 @@ async function handleHealthCheck(req, res) {
 router.get("/", handleHealthCheck);
 
 /**
- * GET /health
+ * GET /health and GET /api/health
  * Dedicated health check endpoint with full subsystem status.
  */
 router.get("/health", handleHealthCheck);
+router.get("/api/health", handleHealthCheck);
 
 /**
  * POST /chat

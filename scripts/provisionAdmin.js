@@ -32,6 +32,7 @@ Options:
   --name              Display name of the administrator, e.g. "Raghav" or "Divya" (required)
   --role              Administrative role: ${VALID_ADMIN_ROLES.join(", ")} (required)
   --allow-role-change Explicitly permit changing an existing admin's role
+  --dev-unverified    [DEV ONLY] Permit provisioning without live Firebase check (strictly blocked in production)
   --help              Show this guidance
 
 Available Roles:
@@ -58,6 +59,8 @@ function parseArgs(args) {
       parsed.role = args[++i];
     } else if (arg === "--allow-role-change") {
       parsed.allowRoleChange = true;
+    } else if (arg === "--dev-unverified") {
+      parsed.devUnverified = true;
     }
   }
   return parsed;
@@ -77,6 +80,11 @@ async function main() {
     process.exit(1);
   }
 
+  if (args.devUnverified && process.env.NODE_ENV === "production") {
+    console.error("❌ Fatal Security Error: --dev-unverified is strictly forbidden in production mode!\n");
+    process.exit(1);
+  }
+
   try {
     console.log(`\n⏳ Provisioning administrator: "${args.name}" (${args.role})...`);
     const admin = await provisionAdminAccount({
@@ -85,6 +93,7 @@ async function main() {
       displayName: args.name,
       roleId: args.role,
       allowRoleChange: Boolean(args.allowRoleChange),
+      devAllowUnverified: Boolean(args.devUnverified),
     });
 
     console.log("✅ Administrator successfully provisioned in PostgreSQL!");
