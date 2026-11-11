@@ -197,25 +197,80 @@ async function runBookingTestSuite() {
     // =========================================================================
     console.log("🧪 1. Service Catalog & NULL Pricing Preservation");
 
-    await itAsync("GET /api/services lists all 5 active salon services", async () => {
+    await itAsync("GET /api/services lists all 5 active salon services with canonical pricing and descriptions", async () => {
       const res = await makeRequest("/api/services");
       assert.strictEqual(res.status, 200);
       assert.strictEqual(res.body.status, "success");
       assert.strictEqual(res.body.services.length, 5);
 
+      // 1. Bespoke Gel Extensions: Base ₹1499, Promo ₹999
       const gelExtensions = res.body.services.find((s) => s.id === "gel_extensions");
       assert.ok(gelExtensions);
+      assert.strictEqual(gelExtensions.basePrice, 1499.0);
+      assert.strictEqual(gelExtensions.promotionalPrice, 999.0);
       assert.strictEqual(gelExtensions.effectivePrice, 999.0);
       assert.strictEqual(gelExtensions.isCustomQuote, false);
+      assert.strictEqual(gelExtensions.pricingDisplay, "From ₹999");
       assert.ok(gelExtensions.addons.length >= 2);
+
+      // 2. Natural Nail Overlay: Base ₹1299, Promo ₹999
+      const naturalOverlay = res.body.services.find((s) => s.id === "natural_overlay");
+      assert.ok(naturalOverlay);
+      assert.strictEqual(naturalOverlay.basePrice, 1299.0);
+      assert.strictEqual(naturalOverlay.promotionalPrice, 999.0);
+      assert.strictEqual(naturalOverlay.effectivePrice, 999.0);
+      assert.strictEqual(naturalOverlay.isCustomQuote, false);
+      assert.strictEqual(naturalOverlay.pricingDisplay, "From ₹999");
+
+      // 3. Power Polish: Base ₹1199, Promo ₹999, Sanitize description
+      const powerPolish = res.body.services.find((s) => s.id === "power_polish");
+      assert.ok(powerPolish);
+      assert.strictEqual(powerPolish.basePrice, 1199.0);
+      assert.strictEqual(powerPolish.promotionalPrice, 999.0);
+      assert.strictEqual(powerPolish.effectivePrice, 999.0);
+      assert.strictEqual(powerPolish.isCustomQuote, false);
+      assert.strictEqual(powerPolish.pricingDisplay, "From ₹999");
+      assert.strictEqual(
+        powerPolish.description,
+        "A polished, high-gloss gel manicure service on natural nails for clients seeking long-lasting vibrant colour without tip extensions."
+      );
+      assert.strictEqual(powerPolish.description.includes("Russian"), false);
+
+      // 4. Custom 3D Art: Base NULL, Promo NULL
+      const custom3d = res.body.services.find((s) => s.id === "custom_3d_art");
+      assert.ok(custom3d);
+      assert.strictEqual(custom3d.basePrice, null);
+      assert.strictEqual(custom3d.promotionalPrice, null);
+      assert.strictEqual(custom3d.effectivePrice, null);
+      assert.strictEqual(custom3d.isCustomQuote, true);
+      assert.strictEqual(custom3d.pricingDisplay, "Custom Quote");
+
+      // 5. Extension Removal: Base NULL, Promo NULL
+      const removal = res.body.services.find((s) => s.id === "extension_removal");
+      assert.ok(removal);
+      assert.strictEqual(removal.basePrice, null);
+      assert.strictEqual(removal.promotionalPrice, null);
+      assert.strictEqual(removal.effectivePrice, null);
+      assert.strictEqual(removal.isCustomQuote, true);
+      assert.strictEqual(removal.pricingDisplay, "Custom Quote");
     });
 
-    await itAsync("GET /api/services preserves NULL pricing for custom quote services", async () => {
+    await itAsync("GET /api/services/:id preserves NULL pricing for custom quote services", async () => {
       const res = await makeRequest("/api/services/custom_3d_art");
       assert.strictEqual(res.status, 200);
+      assert.strictEqual(res.body.service.basePrice, null);
+      assert.strictEqual(res.body.service.promotionalPrice, null);
       assert.strictEqual(res.body.service.effectivePrice, null);
       assert.strictEqual(res.body.service.isCustomQuote, true);
       assert.strictEqual(res.body.service.pricingDisplay, "Custom Quote");
+
+      const removalRes = await makeRequest("/api/services/extension_removal");
+      assert.strictEqual(removalRes.status, 200);
+      assert.strictEqual(removalRes.body.service.basePrice, null);
+      assert.strictEqual(removalRes.body.service.promotionalPrice, null);
+      assert.strictEqual(removalRes.body.service.effectivePrice, null);
+      assert.strictEqual(removalRes.body.service.isCustomQuote, true);
+      assert.strictEqual(removalRes.body.service.pricingDisplay, "Custom Quote");
     });
 
     // =========================================================================

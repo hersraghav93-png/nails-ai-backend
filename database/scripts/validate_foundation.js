@@ -62,7 +62,7 @@ const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf-8'));
 
 assert(manifest.project === 'Nails by Divya', 'Manifest project name matches');
 assert(manifest.target_engine === 'PostgreSQL 15+', 'Target engine is PostgreSQL 15+');
-assert(manifest.migrations.length === 2, 'Migration count is 2 (001_initial_schema, 002_add_firebase_uid)');
+assert(manifest.migrations.length === 3, 'Migration count is 3 (001_initial_schema, 002_add_firebase_uid, 003_reconcile_service_catalog_pricing)');
 assert(manifest.seeds.length === 5, 'Seed count is 5');
 
 manifest.migrations.forEach(m => {

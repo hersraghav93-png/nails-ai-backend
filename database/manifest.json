@@ -1,7 +1,7 @@
 {
   "project": "Nails by Divya",
-  "phase": "Phase 1C - Authentication & User Accounts",
-  "version": "1.3.0",
+  "phase": "Phase 4B.1 - Service Catalog Reconciliation",
+  "version": "1.3.1",
   "target_engine": "PostgreSQL 15+",
   "status": "FINAL_VERIFIED_FOUNDATION",
   "created_at": "2026-11-11T07:35:00Z",
@@ -26,6 +26,16 @@
       "down_sha256": "D57863FAB2E19D1483AE655E58B6F61086A9AF56536020FF11ACE3E611CC90C7",
       "table_count": 50,
       "description": "Add firebase_uid column and index to users table for Firebase Phone Authentication"
+    },
+    {
+      "id": "003",
+      "name": "003_reconcile_service_catalog_pricing",
+      "up_file": "migrations/003_reconcile_service_catalog_pricing.sql",
+      "down_file": "migrations/003_reconcile_service_catalog_pricing_rollback.sql",
+      "sha256": "70F4C7105770511958B452C10B8A9450A57E294694EB82404E9F6B88BC5F4795",
+      "down_sha256": "2803E50E29F62FF896343076E5B7BA4B6002B875CB4489885C8BFADE5DDD0F8C",
+      "table_count": 50,
+      "description": "Reconcile salon service catalog base prices and descriptions with approved canonical offerings (gel_extensions, natural_overlay, power_polish)"
     }
   ],
   "seeds": [
@@ -33,8 +43,8 @@
       "id": "001",
       "name": "001_roles_and_categories",
       "file": "seeds/001_roles_and_categories.sql",
-      "sha256": "14EEDCF1C1234E6CA088AD7C62B740306DDF15ACFD5006228C163DF079A6BE8C",
-      "description": "Default RBAC roles (4), fine-grained permissions (15), role mappings, product categories (4), portfolio categories (4), salon services (5), add-ons (3 unset prices), Delhi NCR manual review fallback (unverified PIN codes removed)"
+      "sha256": "C84740207AF55CB0132F486C03A663E551D80F1D737DDBE54D9DF967E1C1F611",
+      "description": "Default RBAC roles (4), fine-grained permissions (15), role mappings, product categories (4), portfolio categories (4), canonical salon services (5 with approved base/promo pricing & descriptions), add-ons (3 unset prices), Delhi NCR manual review fallback (unverified PIN codes removed)"
     },
     {
       "id": "002",
@@ -72,9 +82,11 @@
     "seeds/003_portfolio_lookbook.sql",
     "seeds/004_faqs.sql",
     "seeds/005_business_settings.sql",
-    "migrations/002_add_firebase_uid.sql"
+    "migrations/002_add_firebase_uid.sql",
+    "migrations/003_reconcile_service_catalog_pricing.sql"
   ],
   "rollback_order": [
+    "migrations/003_reconcile_service_catalog_pricing_rollback.sql",
     "migrations/002_add_firebase_uid_rollback.sql",
     "migrations/001_initial_schema_rollback.sql"
   ],

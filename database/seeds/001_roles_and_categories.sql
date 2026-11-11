@@ -77,12 +77,15 @@ ON CONFLICT (id) DO NOTHING;
 
 -- 6. Services Menu
 INSERT INTO services (id, name, base_price, promotional_price, estimated_duration_minutes, description, is_active) VALUES
-('gel_extensions', 'Bespoke Gel Extensions', NULL, 999.00, 120, 'Sculpted tips using professional soft gel or polygel. Lightweight, durable, and tailored to custom length and shape.', TRUE),
-('natural_overlay', 'Natural Nail Overlay & Strengthening', NULL, 999.00, 90, 'Structured gel layer applied directly over natural nails to add strength, prevent breaking, and provide a flawless chip-free canvas.', TRUE),
-('power_polish', 'Signature Manicure & Power Polish', NULL, 999.00, 60, 'Precision Russian cuticle cleanup, nail shaping, and long-lasting gel polish application staying ultra-shiny for 3+ weeks.', TRUE),
+('gel_extensions', 'Bespoke Gel Extensions', 1499.00, 999.00, 120, 'Sculpted tips using professional soft gel or polygel. Lightweight, durable, and tailored to custom length and shape.', TRUE),
+('natural_overlay', 'Natural Nail Overlay & Strengthening', 1299.00, 999.00, 90, 'Structured gel layer applied directly over natural nails to add strength, prevent breaking, and provide a flawless chip-free canvas.', TRUE),
+('power_polish', 'Signature Manicure & Power Polish', 1199.00, 999.00, 60, 'A polished, high-gloss gel manicure service on natural nails for clients seeking long-lasting vibrant colour without tip extensions.', TRUE),
 ('custom_3d_art', '3D, Chrome & Custom Artistry', NULL, NULL, 60, 'Custom hand-painted floral motifs, glazed chrome aura effects, French ombré fades, or 3D textured accents tailored to your outfit.', TRUE),
 ('extension_removal', 'Nail Extension Removal', NULL, NULL, 45, 'Gentle, damage-free professional soak-off and conditioning removal for existing sets.', TRUE)
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+  base_price = EXCLUDED.base_price,
+  promotional_price = EXCLUDED.promotional_price,
+  description = EXCLUDED.description;
 
 -- 7. Service Add-ons (Prices unverified - kept unset pending operator approval)
 INSERT INTO service_addons (service_id, name, price, is_active) VALUES
