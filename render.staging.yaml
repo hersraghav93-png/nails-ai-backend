@@ -1,7 +1,8 @@
 # Render Infrastructure-as-Code Blueprint
-# Nails by Divya — Staging Environment (Phase 4A.1)
+# Nails by Divya — Staging Environment (100% Free Tier — ₹0 Budget)
+# Web Service: nails-ai-backend-staging (Render Free Compute: 0.1 CPU, 512MB RAM)
+# Database: External Isolated Neon Serverless PostgreSQL (Neon Free Tier: 1GB, permanent)
 # API Host: staging-api.nailsbydivya.store
-# Database: nailsbydivya-staging-db (PostgreSQL 16)
 
 version: "1"
 
@@ -9,12 +10,11 @@ services:
   - type: web
     name: nails-ai-backend-staging
     runtime: node
-    plan: starter
+    plan: free
     region: singapore
     branch: feature/phase-4a-staging-integration
     buildCommand: npm install
-    preDeployCommand: npm run migrate
-    startCommand: npm start
+    startCommand: npm run migrate && npm start
     healthCheckPath: /health
     autoDeploy: false
     domains:
@@ -30,11 +30,9 @@ services:
       - key: TRUST_PROXY
         value: "true"
 
-      # PostgreSQL Staging Connection (Auto-wired from database resource)
+      # PostgreSQL Staging Connection (External Neon Free Serverless PostgreSQL)
       - key: DATABASE_URL
-        fromDatabase:
-          name: nailsbydivya-staging-db
-          property: connectionString
+        sync: false
 
       # CORS Strict Allowlist for Staging (Strictly isolated: production and localhost origins prohibited)
       - key: ALLOWED_ORIGINS
@@ -54,7 +52,7 @@ services:
       - key: BROWSE_RATE_LIMIT_MAX
         value: "300"
 
-      # Meta WhatsApp Cloud API (v26.0 - secrets managed securely in Render dashboard)
+      # Meta WhatsApp Cloud API (v26.0 - Disabled until credentials configured)
       - key: WHATSAPP_GRAPH_API_VERSION
         value: v26.0
       - key: WHATSAPP_ACCESS_TOKEN
@@ -70,7 +68,7 @@ services:
       - key: WHATSAPP_APPROVED_RECIPIENTS
         sync: false
 
-      # Firebase Admin Staging Credentials (service account secret values managed in Render dashboard)
+      # Firebase Admin Staging Credentials (Disabled until credentials configured)
       - key: FIREBASE_PROJECT_ID
         sync: false
       - key: FIREBASE_CLIENT_EMAIL
@@ -83,12 +81,3 @@ services:
         sync: false
       - key: ADMIN_INVITE_SECRET
         sync: false
-
-databases:
-  - name: nailsbydivya-staging-db
-    plan: starter
-    databaseName: nailsbydivya_staging
-    user: nailsbydivya_staging_user
-    region: singapore
-    postgresMajorVersion: "16"
-    ipAllowList: [] # Private network access by default; allow operator IPs as needed

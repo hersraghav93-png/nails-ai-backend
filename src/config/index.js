@@ -27,7 +27,10 @@ const candidateFrontendPaths = [
 
 const resolvedFrontendPath = candidateFrontendPaths.find((p) => fs.existsSync(p)) || candidateFrontendPaths[0];
 
-const isSslRequired = process.env.PGSSLMODE === "require" || process.env.DATABASE_SSL === "true";
+const isSslRequired =
+  process.env.PGSSLMODE === "require" ||
+  process.env.DATABASE_SSL === "true" ||
+  Boolean(process.env.DATABASE_URL && (process.env.DATABASE_URL.includes("sslmode=require") || process.env.DATABASE_URL.includes("neon.tech")));
 
 const CONFIG = {
   port: parseInt(process.env.PORT || "3000", 10),
