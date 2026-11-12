@@ -79,7 +79,7 @@ async function cleanupTestArtifacts() {
     await query("DELETE FROM product_images WHERE product_id IN (SELECT id FROM products WHERE sku LIKE 'TEST-%');");
     await query("DELETE FROM product_variants WHERE product_id IN (SELECT id FROM products WHERE sku LIKE 'TEST-%');");
     await query("DELETE FROM products WHERE sku LIKE 'TEST-%' OR name LIKE 'Imperial Emerald Velvet%';");
-    await query("DELETE FROM customer_reviews WHERE customer_name LIKE '%CMS Test%';");
+    await query("DELETE FROM customer_reviews WHERE customer_name LIKE '%CMS Test%' OR customer_name = 'Radhika Mehra' OR customer_phone = '+919811223344' OR customer_name = 'Pooja V';");
     await query("DELETE FROM portfolio_designs WHERE name LIKE '%Molten Platinum%';");
   } catch (err) {
     // Non-fatal cleanup
@@ -236,6 +236,96 @@ async function runAdminDashboardCMSSuite() {
       const pubRes = await makeRequest("/api/reviews");
       const foundPublic = pubRes.body.reviews.find((r) => r.id === submittedReviewId);
       assert.strictEqual(foundPublic, undefined, "Rejected review must be removed from storefront");
+    });
+
+    await itAsync("Review submission with invalid UUID order_id is rejected with 400", async () => {
+      const res = await makeRequest("/api/reviews", {
+        method: "POST",
+        body: {
+          customer_name: "Pooja V",
+          rating: 5,
+          review_text: "Great experience with custom sizing.",
+          order_id: "not-a-valid-uuid",
+        },
+      });
+      assert.strictEqual(res.status, 400);
+      assert.strictEqual(res.body.code, "INVALID_ORDER_ID");
+    });
+
+    await itAsync("Review submission with non-existent order_id is rejected with 404", async () => {
+      const res = await makeRequest("/api/reviews", {
+        method: "POST",
+        body: {
+          customer_name: "Pooja V",
+          rating: 5,
+          review_text: "Great experience with custom sizing.",
+          order_id: "00000000-0000-4000-8000-000000000999",
+        },
+      });
+      assert.strictEqual(res.status, 404);
+      assert.strictEqual(res.body.code, "ORDER_NOT_FOUND");
+    });
+
+    await itAsync("Review submission with mismatched contact info fails ownership verification (403)", async () => {
+      // Create a test delivered order
+      const orderRes = await query(`
+        INSERT INTO orders (
+          order_number, customer_name, customer_phone, customer_email,
+          shipping_address, subtotal, total_amount, order_status, payment_status, fulfilment_status
+        ) VALUES (
+          $1, 'Ananya Verma', '+919811887766', 'ananya@example.com',
+          '{"address_line1":"123 Test St","city":"New Delhi","state":"Delhi","postal_code":"110001"}',
+          1800, 1800, 'COMPLETED', 'VERIFIED', 'DELIVERED'
+        ) RETURNING id;
+      `, [`NBD-REV-${Date.now()}`]);
+      const testOrderId = orderRes.rows[0].id;
+
+      try {
+        const res = await makeRequest("/api/reviews", {
+          method: "POST",
+          body: {
+            customer_name: "Intruder User",
+            customer_phone: "+919999999999",
+            rating: 5,
+            review_text: "Trying to review someone else's order.",
+            order_id: testOrderId,
+          },
+        });
+        assert.strictEqual(res.status, 403);
+        assert.strictEqual(res.body.code, "ORDER_OWNERSHIP_MISMATCH");
+
+        // Submitting with correct matching contact succeeds
+        const validRes = await makeRequest("/api/reviews", {
+          method: "POST",
+          body: {
+            customer_name: "Ananya Verma",
+            customer_phone: "+919811887766",
+            rating: 5,
+            title: "Perfect sizing",
+            review_text: "Handmade press-ons fit like a glove, highly recommend!",
+            order_id: testOrderId,
+          },
+        });
+        assert.strictEqual(validRes.status, 201);
+        assert.strictEqual(validRes.body.status, "success");
+
+        // Duplicate review on same order rejected
+        const dupRes = await makeRequest("/api/reviews", {
+          method: "POST",
+          body: {
+            customer_name: "Ananya Verma",
+            customer_phone: "+919811887766",
+            rating: 5,
+            review_text: "Attempting to post duplicate review on same order.",
+            order_id: testOrderId,
+          },
+        });
+        assert.strictEqual(dupRes.status, 409);
+        assert.strictEqual(dupRes.body.code, "DUPLICATE_REVIEW");
+      } finally {
+        await query("DELETE FROM customer_reviews WHERE order_id = $1;", [testOrderId]);
+        await query("DELETE FROM orders WHERE id = $1;", [testOrderId]);
+      }
     });
 
     // -------------------------------------------------------------------------
@@ -463,6 +553,46 @@ async function runAdminDashboardCMSSuite() {
       assert.strictEqual(res.body.code, "UNSUPPORTED_MEDIA_TYPE");
     });
 
+    await itAsync("Upload rejects spoofed MIME type (text bytes declared as image/jpeg)", async () => {
+      const res = await makeRequest("/api/admin/uploads", {
+        method: "POST",
+        headers: { Authorization: "Bearer token_divya" },
+        body: {
+          contentType: "image/jpeg",
+          data: Buffer.from("<html><script>alert(1)</script></html>").toString("base64"),
+        },
+      });
+      assert.strictEqual(res.status, 400);
+      assert.strictEqual(res.body.code, "UNSUPPORTED_MEDIA_TYPE");
+    });
+
+    await itAsync("Upload rejects client MIME mismatch (JPEG image declared as image/png)", async () => {
+      const jpegBase64 = "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAIBAQIBAQICAgICAgICAwUDAwMDAwYEBAMFBwYHBwcGBwcICQsJCAgKCAcHCg0KCgsMDAwMBwkODw0MDgsMDAz/2wBDAQICAgMDAwYDAwYMCAcIDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAz/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAAAP/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AL+AD//Z";
+      const res = await makeRequest("/api/admin/uploads", {
+        method: "POST",
+        headers: { Authorization: "Bearer token_divya" },
+        body: {
+          contentType: "image/png",
+          data: jpegBase64,
+        },
+      });
+      assert.strictEqual(res.status, 400);
+      assert.strictEqual(res.body.code, "MIME_TYPE_MISMATCH");
+    });
+
+    await itAsync("Upload rejects malformed Base64 payload", async () => {
+      const res = await makeRequest("/api/admin/uploads", {
+        method: "POST",
+        headers: { Authorization: "Bearer token_divya" },
+        body: {
+          contentType: "image/png",
+          data: "not-valid-base64!!!",
+        },
+      });
+      assert.strictEqual(res.status, 400);
+      assert.strictEqual(res.body.code, "INVALID_UPLOAD_PAYLOAD");
+    });
+
     // -------------------------------------------------------------------------
     // 5. SECURITY, RBAC & UNAPPROVED ACCESS GUARDS
     // -------------------------------------------------------------------------
@@ -518,10 +648,14 @@ async function runAdminDashboardCMSSuite() {
 }
 
 if (require.main === module) {
-  runAdminDashboardCMSSuite().catch((err) => {
-    console.error(err);
-    process.exit(1);
-  });
+  runAdminDashboardCMSSuite()
+    .then(() => {
+      process.exit(0);
+    })
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    });
 }
 
 module.exports = { runAdminDashboardCMSSuite };

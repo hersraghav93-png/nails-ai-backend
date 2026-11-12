@@ -1002,56 +1002,127 @@ async function handleRejectReview(req, res) {
 // =============================================================================
 
 /**
+ * Detects image format from binary magic bytes (file signature).
+ * Supported: JPEG (FF D8 FF), PNG (89 50 4E 47 0D 0A 1A 0A), WEBP (RIFF....WEBP).
+ *
+ * @param {Buffer} buf
+ * @returns {{ ext: string, mime: string } | null}
+ */
+function detectImageFormatFromBuffer(buf) {
+  if (!Buffer.isBuffer(buf) || buf.length < 12) return null;
+
+  // JPEG signature: FF D8 FF
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) {
+    return { ext: "jpg", mime: "image/jpeg" };
+  }
+
+  // PNG signature: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47 &&
+    buf[4] === 0x0D && buf[5] === 0x0A && buf[6] === 0x1A && buf[7] === 0x0A
+  ) {
+    return { ext: "png", mime: "image/png" };
+  }
+
+  // WebP signature: RIFF [4 bytes] WEBP
+  if (
+    buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+    buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50
+  ) {
+    return { ext: "webp", mime: "image/webp" };
+  }
+
+  return null;
+}
+
+/**
  * POST /api/admin/uploads
  * Requires 'Edit Catalog Details' permission.
- * Uploads a photograph and stores it persistently in the uploads directory.
- * Returns a permanent, non-transient URL.
+ * Uploads an image, validates magic numbers, and stores it in the uploads directory.
+ * Returns relative public URL without internal server path exposure.
  */
 router.post("/uploads", requirePermission("Edit Catalog Details"), async (req, res) => {
   try {
-    const { filename, contentType, content_type, data, image } = req.body || {};
+    const { contentType, content_type, data, image } = req.body || {};
 
-    let mimeType = contentType || content_type;
+    let clientMime = contentType || content_type;
     let base64Data = data;
 
-    // Handle data URL (e.g. data:image/png;base64,iVBORw0KGgo...)
-    if (image && typeof image === "string" && image.startsWith("data:")) {
-      const match = image.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
-      if (match) {
-        mimeType = match[1];
-        base64Data = match[2];
+    // Handle Data URL (e.g. data:image/png;base64,iVBORw0KGgo...)
+    if (image && typeof image === "string") {
+      if (image.startsWith("data:")) {
+        const match = image.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+        if (match) {
+          clientMime = match[1];
+          base64Data = match[2];
+        } else {
+          return res.status(400).json({
+            error: "Malformed Data URL format.",
+            code: "INVALID_UPLOAD_PAYLOAD",
+          });
+        }
+      } else {
+        base64Data = image;
       }
     } else if (typeof data === "string" && data.startsWith("data:")) {
       const match = data.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
       if (match) {
-        mimeType = match[1];
+        clientMime = match[1];
         base64Data = match[2];
+      } else {
+        return res.status(400).json({
+          error: "Malformed Data URL format.",
+          code: "INVALID_UPLOAD_PAYLOAD",
+        });
       }
     }
 
-    if (!base64Data) {
+    if (!base64Data || typeof base64Data !== "string" || !base64Data.trim()) {
       return res.status(400).json({
-        error: "Missing image data. Provide base64 encoded data or data URL.",
+        error: "Missing image data. Provide Base64-encoded image data or a valid Data URL.",
         code: "INVALID_UPLOAD_PAYLOAD",
       });
     }
 
-    const ALLOWED_MIME = {
-      "image/jpeg": "jpg",
-      "image/jpg": "jpg",
-      "image/png": "png",
-      "image/webp": "webp",
-    };
+    const ALLOWED_MIMES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+    if (clientMime && typeof clientMime === "string") {
+      const normalizedClientMime = clientMime.toLowerCase().trim();
+      if (!ALLOWED_MIMES.includes(normalizedClientMime)) {
+        return res.status(400).json({
+          error: "Unsupported image format. Allowed formats: JPEG, PNG, WEBP.",
+          code: "UNSUPPORTED_MEDIA_TYPE",
+        });
+      }
+    }
 
-    const ext = ALLOWED_MIME[mimeType ? mimeType.toLowerCase() : ""];
-    if (!ext) {
+    // Strip whitespace / newlines
+    const cleanBase64 = base64Data.replace(/\s+/g, "");
+
+    // Basic Base64 pattern validation
+    if (!/^[A-Za-z0-9+/=]+$/.test(cleanBase64) || cleanBase64.length % 4 !== 0) {
       return res.status(400).json({
-        error: "Unsupported image format. Allowed formats: JPEG, PNG, WEBP.",
-        code: "UNSUPPORTED_MEDIA_TYPE",
+        error: "Malformed Base64 payload encoding.",
+        code: "INVALID_UPLOAD_PAYLOAD",
       });
     }
 
-    const buffer = Buffer.from(base64Data, "base64");
+    let buffer;
+    try {
+      buffer = Buffer.from(cleanBase64, "base64");
+    } catch {
+      return res.status(400).json({
+        error: "Could not decode Base64 payload.",
+        code: "INVALID_UPLOAD_PAYLOAD",
+      });
+    }
+
+    if (buffer.length < 12) {
+      return res.status(400).json({
+        error: "Uploaded file payload is empty or too small to be a valid image.",
+        code: "INVALID_UPLOAD_PAYLOAD",
+      });
+    }
+
     if (buffer.length > 5 * 1024 * 1024) {
       return res.status(400).json({
         error: "Image exceeds maximum allowed size of 5MB.",
@@ -1059,16 +1130,56 @@ router.post("/uploads", requirePermission("Edit Catalog Details"), async (req, r
       });
     }
 
-    // Content-addressed filename
-    const hash = crypto.createHash("sha256").update(buffer).digest("hex").slice(0, 16);
-    const targetFilename = `upload_${hash}.${ext}`;
-    const uploadDir = path.join(__dirname, "../../uploads");
+    // Strictly detect actual binary file signature (magic numbers)
+    const detected = detectImageFormatFromBuffer(buffer);
+    if (!detected) {
+      return res.status(400).json({
+        error: "Unsupported or invalid file signature. Allowed formats: JPEG, PNG, WEBP.",
+        code: "UNSUPPORTED_MEDIA_TYPE",
+      });
+    }
 
+    // If client specified MIME type, ensure it matches detected binary format
+    if (clientMime && typeof clientMime === "string") {
+      const normalizedClientMime = clientMime.toLowerCase().trim();
+      const ALLOWED_MIMES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+      if (!ALLOWED_MIMES.includes(normalizedClientMime)) {
+        return res.status(400).json({
+          error: "Unsupported client MIME type. Allowed formats: JPEG, PNG, WEBP.",
+          code: "UNSUPPORTED_MEDIA_TYPE",
+        });
+      }
+      if (
+        (detected.ext === "jpg" && !normalizedClientMime.includes("jpeg") && !normalizedClientMime.includes("jpg")) ||
+        (detected.ext === "png" && !normalizedClientMime.includes("png")) ||
+        (detected.ext === "webp" && !normalizedClientMime.includes("webp"))
+      ) {
+        return res.status(400).json({
+          error: `MIME type mismatch: declared '${clientMime}' but binary signature is '${detected.mime}'.`,
+          code: "MIME_TYPE_MISMATCH",
+        });
+      }
+    }
+
+    // Content-addressed filename based strictly on SHA-256 of the validated buffer
+    const hash = crypto.createHash("sha256").update(buffer).digest("hex").slice(0, 16);
+    const targetFilename = `upload_${hash}.${detected.ext}`;
+
+    const uploadDir = path.resolve(process.cwd(), "uploads");
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
 
-    const targetPath = path.join(uploadDir, targetFilename);
+    const targetPath = path.resolve(uploadDir, targetFilename);
+
+    // Path traversal defense: Ensure targetPath is strictly inside uploadDir
+    if (!targetPath.startsWith(uploadDir) || path.dirname(targetPath) !== uploadDir) {
+      return res.status(400).json({
+        error: "Invalid target file path.",
+        code: "PATH_TRAVERSAL_DETECTED",
+      });
+    }
+
     fs.writeFileSync(targetPath, buffer);
 
     const publicUrl = `/uploads/${targetFilename}`;
@@ -1079,7 +1190,7 @@ router.post("/uploads", requirePermission("Edit Catalog Details"), async (req, r
       url: publicUrl,
       filename: targetFilename,
       size: buffer.length,
-      mimeType,
+      mimeType: detected.mime,
     });
   } catch (err) {
     console.error("❌ [Admin Upload Error]:", err.message);

@@ -38,8 +38,19 @@ app.use(
   })
 );
 
-// Serve persistent uploads
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+// Serve uploads with strict security headers and MIME protection
+app.use(
+  "/uploads",
+  express.static(path.join(__dirname, "uploads"), {
+    dotfiles: "ignore",
+    index: false,
+    maxAge: "1d",
+    setHeaders: (res) => {
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    },
+  })
+);
 
 // 2. Initialize AI Service & In-Memory Knowledge Base
 initAiService();

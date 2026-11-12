@@ -28,6 +28,12 @@ function isValidUuid(id) {
   return typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
 }
 
+function normalizePhoneDigits(phone) {
+  if (!phone || typeof phone !== "string") return "";
+  const digits = phone.replace(/\D/g, "");
+  return digits.length > 10 ? digits.slice(-10) : digits;
+}
+
 /**
  * Submits genuine customer feedback.
  * All submissions are stored with is_approved = FALSE by default.
@@ -87,14 +93,135 @@ async function submitCustomerReview(reviewData) {
     throw err;
   }
 
+  // 1. Validate Order linkage & Ownership Verification (if provided)
+  let verifiedOrderId = null;
+  if (ordId) {
+    if (!isValidUuid(ordId)) {
+      const err = new Error("Invalid order ID format. Must be a valid UUID.");
+      err.code = "INVALID_ORDER_ID";
+      err.statusCode = 400;
+      throw err;
+    }
+    const orderRes = await query(
+      `SELECT id, order_status, fulfilment_status, customer_phone, customer_email FROM orders WHERE id = $1;`,
+      [ordId]
+    );
+    if (orderRes.rows.length === 0) {
+      const err = new Error("Referenced order does not exist.");
+      err.code = "ORDER_NOT_FOUND";
+      err.statusCode = 404;
+      throw err;
+    }
+    const order = orderRes.rows[0];
+    if (order.fulfilment_status !== "DELIVERED" && order.order_status !== "COMPLETED") {
+      const err = new Error("Reviews can only be submitted for delivered press-on orders.");
+      err.code = "ORDER_NOT_ELIGIBLE_FOR_REVIEW";
+      err.statusCode = 400;
+      throw err;
+    }
+
+    // Security Guard: Submitter must provide contact info matching the order record
+    const submitterPhoneDigits = normalizePhoneDigits(phone);
+    const orderPhoneDigits = normalizePhoneDigits(order.customer_phone);
+    const submitterEmailNorm = email ? email.toLowerCase().trim() : "";
+    const orderEmailNorm = order.customer_email ? order.customer_email.toLowerCase().trim() : "";
+
+    const phoneMatches = Boolean(submitterPhoneDigits && orderPhoneDigits && submitterPhoneDigits === orderPhoneDigits);
+    const emailMatches = Boolean(submitterEmailNorm && orderEmailNorm && submitterEmailNorm === orderEmailNorm);
+
+    if (!phoneMatches && !emailMatches) {
+      const err = new Error("Order ownership verification failed. The provided contact details do not match the customer record on file for this order.");
+      err.code = "ORDER_OWNERSHIP_MISMATCH";
+      err.statusCode = 403;
+      throw err;
+    }
+
+    const dupRes = await query(`SELECT id FROM customer_reviews WHERE order_id = $1;`, [ordId]);
+    if (dupRes.rows.length > 0) {
+      const err = new Error("A review has already been submitted for this order.");
+      err.code = "DUPLICATE_REVIEW";
+      err.statusCode = 409;
+      throw err;
+    }
+    verifiedOrderId = order.id;
+  }
+
+  // 2. Validate Booking linkage & Ownership Verification (if provided)
+  let verifiedBookingId = null;
+  if (bkgId) {
+    if (!isValidUuid(bkgId)) {
+      const err = new Error("Invalid booking ID format. Must be a valid UUID.");
+      err.code = "INVALID_BOOKING_ID";
+      err.statusCode = 400;
+      throw err;
+    }
+    const bkgRes = await query(
+      `SELECT id, booking_status, customer_phone, customer_email FROM bookings WHERE id = $1;`,
+      [bkgId]
+    );
+    if (bkgRes.rows.length === 0) {
+      const err = new Error("Referenced booking does not exist.");
+      err.code = "BOOKING_NOT_FOUND";
+      err.statusCode = 404;
+      throw err;
+    }
+    const bkg = bkgRes.rows[0];
+    if (bkg.booking_status !== "COMPLETED") {
+      const err = new Error("Reviews can only be submitted for completed salon appointments.");
+      err.code = "BOOKING_NOT_ELIGIBLE_FOR_REVIEW";
+      err.statusCode = 400;
+      throw err;
+    }
+
+    // Security Guard: Submitter must provide contact info matching the booking record
+    const submitterPhoneDigits = normalizePhoneDigits(phone);
+    const bkgPhoneDigits = normalizePhoneDigits(bkg.customer_phone);
+    const submitterEmailNorm = email ? email.toLowerCase().trim() : "";
+    const bkgEmailNorm = bkg.customer_email ? bkg.customer_email.toLowerCase().trim() : "";
+
+    const phoneMatches = Boolean(submitterPhoneDigits && bkgPhoneDigits && submitterPhoneDigits === bkgPhoneDigits);
+    const emailMatches = Boolean(submitterEmailNorm && bkgEmailNorm && submitterEmailNorm === bkgEmailNorm);
+
+    if (!phoneMatches && !emailMatches) {
+      const err = new Error("Appointment ownership verification failed. The provided contact details do not match the client record on file for this appointment.");
+      err.code = "BOOKING_OWNERSHIP_MISMATCH";
+      err.statusCode = 403;
+      throw err;
+    }
+
+    const dupRes = await query(`SELECT id FROM customer_reviews WHERE booking_id = $1;`, [bkgId]);
+    if (dupRes.rows.length > 0) {
+      const err = new Error("A review has already been submitted for this appointment.");
+      err.code = "DUPLICATE_REVIEW";
+      err.statusCode = 409;
+      throw err;
+    }
+    verifiedBookingId = bkg.id;
+  }
+
+  // 3. Spam / duplicate submission control for unlinked storefront submissions
+  if (!verifiedOrderId && !verifiedBookingId && phone) {
+    const recentRes = await query(
+      `SELECT id FROM customer_reviews
+       WHERE customer_phone = $1 AND customer_name = $2 AND created_at > CURRENT_TIMESTAMP - INTERVAL '1 hour';`,
+      [phone, name]
+    );
+    if (recentRes.rows.length > 0) {
+      const err = new Error("A feedback submission from this contact was already received recently.");
+      err.code = "DUPLICATE_REVIEW";
+      err.statusCode = 409;
+      throw err;
+    }
+  }
+
   const insertRes = await query(
     `INSERT INTO customer_reviews (
        customer_name, customer_phone, customer_email,
        rating, title, review_text, service_or_product_tag,
        order_id, booking_id, source, is_approved
      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE)
-     RETURNING id, customer_name, rating, title, review_text, service_or_product_tag, source, is_approved, created_at;`,
-    [name, phone, email, numRating, revTitle, text, tag, ordId, bkgId, source]
+     RETURNING id, customer_name, rating, title, review_text, service_or_product_tag, source, is_approved, order_id, booking_id, created_at;`,
+    [name, phone, email, numRating, revTitle, text, tag, verifiedOrderId, verifiedBookingId, source]
   );
 
   return insertRes.rows[0];
@@ -122,6 +249,7 @@ async function listPublicReviews(options = {}) {
        title,
        review_text,
        service_or_product_tag,
+       FALSE AS is_verified_purchase,
        created_at
      FROM customer_reviews
      WHERE is_approved = TRUE
@@ -224,6 +352,7 @@ async function adminModerateReview(reviewId, moderationData, adminUser, ipAddres
   }
 
   const existing = existingRes.rows[0];
+  const moderatorId = isValidUuid(adminUser.id) ? adminUser.id : null;
   const updateRes = await query(
     `UPDATE customer_reviews
      SET is_approved = $1,
@@ -233,7 +362,7 @@ async function adminModerateReview(reviewId, moderationData, adminUser, ipAddres
          updated_at = CURRENT_TIMESTAMP
      WHERE id = $4
      RETURNING *;`,
-    [Boolean(isApproved), adminUser.id || null, notes || null, reviewId]
+    [Boolean(isApproved), moderatorId, notes || null, reviewId]
   );
 
   const updated = updateRes.rows[0];
