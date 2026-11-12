@@ -382,6 +382,145 @@ async function runPaymentVerificationSuite() {
       assert.strictEqual(res.body.code, "INVALID_PAYMENT_TRANSITION");
     });
 
+    await itAsync("Cannot downgrade a VERIFIED payment to MANUAL_VERIFY_REQ", async () => {
+      const res = await makeRequest(`/api/admin/orders/${order1.id}/payment-status`, {
+        method: "PATCH",
+        headers: { Authorization: "Bearer token_divya" },
+        body: {
+          paymentStatus: "MANUAL_VERIFY_REQ",
+        },
+      });
+
+      assert.strictEqual(res.status, 400);
+      assert.strictEqual(res.body.code, "INVALID_PAYMENT_TRANSITION");
+    });
+
+    await itAsync("Cannot downgrade a VERIFIED payment to INITIATED", async () => {
+      const res = await makeRequest(`/api/admin/orders/${order1.id}/payment-status`, {
+        method: "PATCH",
+        headers: { Authorization: "Bearer token_divya" },
+        body: {
+          paymentStatus: "INITIATED",
+        },
+      });
+
+      assert.strictEqual(res.status, 400);
+      assert.strictEqual(res.body.code, "INVALID_PAYMENT_TRANSITION");
+    });
+
+    await itAsync("Underpayment is rejected with 400 PAYMENT_AMOUNT_INSUFFICIENT", async () => {
+      const underpayOrder = await createTestOrder("-UNDERPAY-1");
+      const res = await makeRequest(`/api/admin/orders/${underpayOrder.id}/payment-status`, {
+        method: "PATCH",
+        headers: { Authorization: "Bearer token_divya" },
+        body: {
+          paymentStatus: "VERIFIED",
+          amount: 500.00,
+          transactionReference: `UPI-UNDERPAY-${Date.now()}`,
+        },
+      });
+
+      assert.strictEqual(res.status, 400);
+      assert.strictEqual(res.body.code, "PAYMENT_AMOUNT_INSUFFICIENT");
+
+      const check = await query(`SELECT payment_status FROM orders WHERE id = $1;`, [underpayOrder.id]);
+      assert.strictEqual(check.rows[0].payment_status, "PENDING");
+    });
+
+    await itAsync("Overpayment is rejected with 400 PAYMENT_AMOUNT_EXCEEDS_TOTAL", async () => {
+      const overpayOrder = await createTestOrder("-OVERPAY-1");
+      const res = await makeRequest(`/api/admin/orders/${overpayOrder.id}/payment-status`, {
+        method: "PATCH",
+        headers: { Authorization: "Bearer token_divya" },
+        body: {
+          paymentStatus: "VERIFIED",
+          amount: 1500.00,
+          transactionReference: `UPI-OVERPAY-${Date.now()}`,
+        },
+      });
+
+      assert.strictEqual(res.status, 400);
+      assert.strictEqual(res.body.code, "PAYMENT_AMOUNT_EXCEEDS_TOTAL");
+
+      const check = await query(`SELECT payment_status FROM orders WHERE id = $1;`, [overpayOrder.id]);
+      assert.strictEqual(check.rows[0].payment_status, "PENDING");
+    });
+
+    await itAsync("Exact full payment is accepted with 200 OK", async () => {
+      const fullOrder = await createTestOrder("-FULL-1");
+      const res = await makeRequest(`/api/admin/orders/${fullOrder.id}/payment-status`, {
+        method: "PATCH",
+        headers: { Authorization: "Bearer token_divya" },
+        body: {
+          paymentStatus: "VERIFIED",
+          amount: 1198.00,
+          transactionReference: `UPI-FULL-${Date.now()}`,
+        },
+      });
+
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(res.body.paymentStatus, "VERIFIED");
+      assert.strictEqual(res.body.amount, 1198.00);
+    });
+
+    await itAsync("Safe decimal precision: 1197.99 rejected, 1198.01 rejected, string '1198.00' accepted", async () => {
+      const precisionOrder = await createTestOrder("-PREC-1");
+
+      // 1197.99 is 1 paisa short
+      const resShort = await makeRequest(`/api/admin/orders/${precisionOrder.id}/payment-status`, {
+        method: "PATCH",
+        headers: { Authorization: "Bearer token_divya" },
+        body: {
+          paymentStatus: "VERIFIED",
+          amount: 1197.99,
+        },
+      });
+      assert.strictEqual(resShort.status, 400);
+      assert.strictEqual(resShort.body.code, "PAYMENT_AMOUNT_INSUFFICIENT");
+
+      // 1198.01 is 1 paisa over
+      const resOver = await makeRequest(`/api/admin/orders/${precisionOrder.id}/payment-status`, {
+        method: "PATCH",
+        headers: { Authorization: "Bearer token_divya" },
+        body: {
+          paymentStatus: "VERIFIED",
+          amount: 1198.01,
+        },
+      });
+      assert.strictEqual(resOver.status, 400);
+      assert.strictEqual(resOver.body.code, "PAYMENT_AMOUNT_EXCEEDS_TOTAL");
+
+      // String '1198.00' matches exactly
+      const resExact = await makeRequest(`/api/admin/orders/${precisionOrder.id}/payment-status`, {
+        method: "PATCH",
+        headers: { Authorization: "Bearer token_divya" },
+        body: {
+          paymentStatus: "VERIFIED",
+          amount: "1198.00",
+          transactionReference: `UPI-PREC-${Date.now()}`,
+        },
+      });
+      assert.strictEqual(resExact.status, 200);
+      assert.strictEqual(resExact.body.paymentStatus, "VERIFIED");
+    });
+
+    await itAsync("Reject invalid non-positive or non-finite amounts with 400 INVALID_AMOUNT", async () => {
+      const invOrder = await createTestOrder("-INV-AMT");
+
+      for (const badAmt of [-100, 0, "invalid_amount"]) {
+        const res = await makeRequest(`/api/admin/orders/${invOrder.id}/payment-status`, {
+          method: "PATCH",
+          headers: { Authorization: "Bearer token_divya" },
+          body: {
+            paymentStatus: "VERIFIED",
+            amount: badAmt,
+          },
+        });
+        assert.strictEqual(res.status, 400);
+        assert.strictEqual(res.body.code, "INVALID_AMOUNT");
+      }
+    });
+
     await itAsync("Cannot verify payment on an already CANCELLED order", async () => {
       const cancelledOrder = await createTestOrder("-CANCELLED");
       await query(`UPDATE orders SET order_status = 'CANCELLED' WHERE id = $1;`, [cancelledOrder.id]);
@@ -426,11 +565,87 @@ async function runPaymentVerificationSuite() {
     });
 
     // =========================================================================
-    // 4. REPEATED VERIFICATION REQUESTS (IDEMPOTENCY)
+    // 4. REPEATED VERIFICATION REQUESTS & IDEMPOTENCY KEY HANDLING
     // =========================================================================
     console.log("\n🧪 4. Idempotency & Repeated Requests");
 
-    await itAsync("Repeated verification returns 200 OK with alreadyVerified: true", async () => {
+    const orderIdem = await createTestOrder("-IDEM-1");
+    const testIdemKey = `idem-key-${Date.now()}`;
+    const testIdemUtr = `UPI-IDEM-${Date.now()}`;
+
+    await itAsync("First verification with idempotency key succeeds (200 OK)", async () => {
+      const res = await makeRequest(`/api/admin/orders/${orderIdem.id}/payment-status`, {
+        method: "PATCH",
+        headers: { Authorization: "Bearer token_divya" },
+        body: {
+          paymentStatus: "VERIFIED",
+          paymentMethod: "manual_upi",
+          amount: 1198.00,
+          transactionReference: testIdemUtr,
+          idempotencyKey: testIdemKey,
+        },
+      });
+
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(res.body.alreadyVerified, false);
+      assert.strictEqual(res.body.paymentStatus, "VERIFIED");
+    });
+
+    await itAsync("Same key + same order + identical payload returns original result idempotently", async () => {
+      const res = await makeRequest(`/api/admin/orders/${orderIdem.id}/payment-status`, {
+        method: "PATCH",
+        headers: { Authorization: "Bearer token_divya" },
+        body: {
+          paymentStatus: "VERIFIED",
+          paymentMethod: "manual_upi",
+          amount: 1198.00,
+          transactionReference: testIdemUtr,
+          idempotencyKey: testIdemKey,
+        },
+      });
+
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(res.body.alreadyVerified, true);
+      assert.strictEqual(res.body.paymentStatus, "VERIFIED");
+      assert.ok(res.body.message.includes("idempotently"));
+    });
+
+    await itAsync("Same key + same order + different payload returns 409 IDEMPOTENCY_KEY_CONFLICT", async () => {
+      const res = await makeRequest(`/api/admin/orders/${orderIdem.id}/payment-status`, {
+        method: "PATCH",
+        headers: { Authorization: "Bearer token_divya" },
+        body: {
+          paymentStatus: "VERIFIED",
+          paymentMethod: "cash", // Different method!
+          amount: 1198.00,
+          transactionReference: testIdemUtr,
+          idempotencyKey: testIdemKey,
+        },
+      });
+
+      assert.strictEqual(res.status, 409);
+      assert.strictEqual(res.body.code, "IDEMPOTENCY_KEY_CONFLICT");
+    });
+
+    await itAsync("Same key reused on another order returns 409 IDEMPOTENCY_KEY_CONFLICT", async () => {
+      const orderOther = await createTestOrder("-IDEM-OTHER");
+      const res = await makeRequest(`/api/admin/orders/${orderOther.id}/payment-status`, {
+        method: "PATCH",
+        headers: { Authorization: "Bearer token_divya" },
+        body: {
+          paymentStatus: "VERIFIED",
+          paymentMethod: "manual_upi",
+          amount: 1198.00,
+          transactionReference: `UPI-OTHER-${Date.now()}`,
+          idempotencyKey: testIdemKey, // Reused key!
+        },
+      });
+
+      assert.strictEqual(res.status, 409);
+      assert.strictEqual(res.body.code, "IDEMPOTENCY_KEY_CONFLICT");
+    });
+
+    await itAsync("Repeated verification without key returns 200 OK with alreadyVerified: true", async () => {
       const res = await makeRequest(`/api/admin/orders/${order1.id}/payment-status`, {
         method: "PATCH",
         headers: { Authorization: "Bearer token_divya" },
@@ -626,6 +841,145 @@ async function runPaymentVerificationSuite() {
       assert.strictEqual(dispatchRes.status, 200);
       assert.strictEqual(dispatchRes.body.order.fulfilmentStatus, "DISPATCHED");
       assert.strictEqual(dispatchRes.body.order.courierName, "Blue Dart Express");
+    });
+
+    // =========================================================================
+    // 8. DUPLICATE TRANSACTION REFS, CONCURRENCY & ROLLBACK INTEGRITY
+    // =========================================================================
+    console.log("\n🧪 8. Duplicate Transaction Refs, Concurrency & Rollback Integrity");
+
+    await itAsync("Duplicate transaction reference across different orders returns 409 DUPLICATE_TRANSACTION_REFERENCE", async () => {
+      const orderA = await createTestOrder("-DUP-A");
+      const orderB = await createTestOrder("-DUP-B");
+      const sharedUtr = `UPI-SHARED-UTR-${Date.now()}`;
+
+      // Order A verifies with sharedUtr
+      const resA = await makeRequest(`/api/admin/orders/${orderA.id}/payment-status`, {
+        method: "PATCH",
+        headers: { Authorization: "Bearer token_divya" },
+        body: {
+          paymentStatus: "VERIFIED",
+          amount: 1198.00,
+          transactionReference: sharedUtr,
+        },
+      });
+      assert.strictEqual(resA.status, 200);
+
+      // Order B tries to use the same sharedUtr
+      const resB = await makeRequest(`/api/admin/orders/${orderB.id}/payment-status`, {
+        method: "PATCH",
+        headers: { Authorization: "Bearer token_divya" },
+        body: {
+          paymentStatus: "VERIFIED",
+          amount: 1198.00,
+          transactionReference: sharedUtr,
+        },
+      });
+      assert.strictEqual(resB.status, 409);
+      assert.strictEqual(resB.body.code, "DUPLICATE_TRANSACTION_REFERENCE");
+      assert.ok(resB.body.error.includes("already been recorded"));
+    });
+
+    await itAsync("Failed verification rolls back transaction cleanly leaving zero orphaned records", async () => {
+      const rollbackOrder = await createTestOrder("-ROLLBACK-1");
+
+      const failRes = await makeRequest(`/api/admin/orders/${rollbackOrder.id}/payment-status`, {
+        method: "PATCH",
+        headers: { Authorization: "Bearer token_divya" },
+        body: {
+          paymentStatus: "VERIFIED",
+          amount: 50.00, // Insufficient amount triggers rollback
+        },
+      });
+      assert.strictEqual(failRes.status, 400);
+
+      // Verify no payments rows created
+      const payCheck = await query(`SELECT COUNT(*)::int AS count FROM payments WHERE order_id = $1;`, [rollbackOrder.id]);
+      assert.strictEqual(payCheck.rows[0].count, 0);
+
+      // Verify no payment history created
+      const histCheck = await query(
+        `SELECT COUNT(*)::int AS count FROM order_status_history WHERE order_id = $1 AND status_type = 'payment';`,
+        [rollbackOrder.id]
+      );
+      assert.strictEqual(histCheck.rows[0].count, 0);
+
+      // Verify no audit log created
+      const auditCheck = await query(
+        `SELECT COUNT(*)::int AS count FROM audit_logs WHERE target_id = $1;`,
+        [rollbackOrder.id]
+      );
+      assert.strictEqual(auditCheck.rows[0].count, 0);
+    });
+
+    await itAsync("Concurrent verification requests on same order resolve safely without race condition", async () => {
+      const concOrder = await createTestOrder("-CONC-1");
+      const concUtr = `UPI-CONC-${Date.now()}`;
+      const concKey = `conc-key-${Date.now()}`;
+
+      const [res1, res2] = await Promise.all([
+        makeRequest(`/api/admin/orders/${concOrder.id}/payment-status`, {
+          method: "PATCH",
+          headers: { Authorization: "Bearer token_divya" },
+          body: {
+            paymentStatus: "VERIFIED",
+            amount: 1198.00,
+            transactionReference: concUtr,
+            idempotencyKey: concKey,
+          },
+        }),
+        makeRequest(`/api/admin/orders/${concOrder.id}/payment-status`, {
+          method: "PATCH",
+          headers: { Authorization: "Bearer token_divya" },
+          body: {
+            paymentStatus: "VERIFIED",
+            amount: 1198.00,
+            transactionReference: concUtr,
+            idempotencyKey: concKey,
+          },
+        }),
+      ]);
+
+      // Both should succeed (one performs initial verification, the other handles idempotently)
+      assert.strictEqual(res1.status, 200);
+      assert.strictEqual(res2.status, 200);
+      assert.strictEqual(res1.body.paymentStatus, "VERIFIED");
+      assert.strictEqual(res2.body.paymentStatus, "VERIFIED");
+
+      // Verify exactly 1 payment record exists
+      const payCount = await query(`SELECT COUNT(*)::int AS count FROM payments WHERE order_id = $1;`, [concOrder.id]);
+      assert.strictEqual(payCount.rows[0].count, 1);
+    });
+
+    await itAsync("Non-destructive migration rollback guard: aborts with exception when payment history exists", async () => {
+      // Ensure at least one payment history row exists in database
+      const countRes = await query(`SELECT COUNT(*)::int AS count FROM order_status_history WHERE status_type = 'payment';`);
+      assert.ok(countRes.rows[0].count > 0, "Staging database must contain payment status history records");
+
+      // Attempt to execute the safety guard block from 004_add_payment_status_type_to_history_rollback.sql
+      let threwError = false;
+      let errorMsg = "";
+      try {
+        await query(`
+          DO $$
+          BEGIN
+              IF EXISTS (SELECT 1 FROM order_status_history WHERE status_type = 'payment') THEN
+                  RAISE EXCEPTION 'Cannot rollback migration 004: order_status_history table contains records with status_type = ''payment''. Rollback aborted to prevent irreversible loss of payment audit history.';
+              END IF;
+          END $$;
+        `);
+      } catch (err) {
+        threwError = true;
+        errorMsg = err.safeDetails || err.message;
+      }
+
+      assert.strictEqual(threwError, true, "Safety guard block must raise an exception when payment records exist");
+      assert.ok(errorMsg.includes("Cannot rollback migration 004"), "Error message must clearly explain rollback abortion");
+      assert.ok(errorMsg.includes("Rollback aborted to prevent irreversible loss"), "Error message must cite history preservation");
+
+      // Confirm no payment rows were deleted
+      const checkAfter = await query(`SELECT COUNT(*)::int AS count FROM order_status_history WHERE status_type = 'payment';`);
+      assert.strictEqual(checkAfter.rows[0].count, countRes.rows[0].count, "Zero payment history rows must be deleted");
     });
 
   } finally {

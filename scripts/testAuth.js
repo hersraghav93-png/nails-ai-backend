@@ -699,14 +699,14 @@ async function runAuthTestSuite() {
       assert.strictEqual(res.body.overview.totalPortfolioDesigns, 60);
     });
 
-    await itAsync("Super Operator accesses GET /api/admin/me and receives all 15 operational permissions", async () => {
+    await itAsync("Super Operator accesses GET /api/admin/me and receives all 16 operational permissions", async () => {
       const res = await makeRequest("/api/admin/me", {
         headers: { Authorization: "Bearer token_admin_super" },
       });
       assert.strictEqual(res.status, 200);
       assert.strictEqual(res.body.admin.displayName, "Raghav (Super Operator)");
       assert.ok(res.body.admin.roles.includes("super_operator"));
-      assert.strictEqual(res.body.admin.permissions.length, 15, "Super Operator must hold all 15 permissions");
+      assert.strictEqual(res.body.admin.permissions.length, 16, "Super Operator must hold all 16 operational permissions (including orders:verify_payment)");
     });
 
     await itAsync("Super Operator accesses GET /api/admin/overview with universal override", async () => {

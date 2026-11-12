@@ -1439,6 +1439,14 @@ async function adminVerifyOrderPayment(orderId, verifyData, adminUser, ipAddress
     throw err;
   }
 
+  const cleanUtr = transactionReference && typeof transactionReference === "string" && transactionReference.trim()
+    ? transactionReference.trim()
+    : null;
+
+  const cleanIdempotencyKey = idempotencyKey && typeof idempotencyKey === "string" && idempotencyKey.trim()
+    ? idempotencyKey.trim()
+    : null;
+
   const pool = getPool();
   const client = await pool.connect();
 
@@ -1460,7 +1468,7 @@ async function adminVerifyOrderPayment(orderId, verifyData, adminUser, ipAddress
     const order = orderRes.rows[0];
     const previousStatus = order.payment_status;
 
-    // Reject payment verification on cancelled orders
+    // 1. Reject payment verification on cancelled orders
     if (order.order_status === "CANCELLED") {
       const err = new Error(
         `Cannot verify payment for order ${order.order_number} because it has already been CANCELLED.`
@@ -1470,7 +1478,7 @@ async function adminVerifyOrderPayment(orderId, verifyData, adminUser, ipAddress
       throw err;
     }
 
-    // Terminal refund check
+    // 2. Terminal refund check
     if (previousStatus === "REFUNDED") {
       const err = new Error(
         `Order ${order.order_number} is in terminal REFUNDED status and cannot be modified.`
@@ -1480,54 +1488,183 @@ async function adminVerifyOrderPayment(orderId, verifyData, adminUser, ipAddress
       throw err;
     }
 
-    // Idempotency: repeated verification with the same status
-    if (previousStatus === normalizedStatus) {
-      await client.query("COMMIT;");
-      const existingOrder = await getOrderById(orderId, { isAdmin: true, skipAuthCheck: true });
-      return {
-        success: true,
-        orderId: order.id,
-        orderNumber: order.order_number,
-        previousPaymentStatus: previousStatus,
-        paymentStatus: normalizedStatus,
-        alreadyVerified: normalizedStatus === "VERIFIED",
-        message: `Payment status is already '${normalizedStatus}'. Request handled idempotently.`,
-        order: existingOrder.order,
-        payment: existingOrder.payment || null,
-      };
-    }
-
-    // State transition guards: VERIFIED cannot revert to PENDING or FAILED without formal refund
-    if (previousStatus === "VERIFIED" && (normalizedStatus === "PENDING" || normalizedStatus === "FAILED")) {
+    // 3. Strict verified-payment downgrade protection:
+    // If previous status is VERIFIED, reject every transition to a different status through this endpoint.
+    if (previousStatus === "VERIFIED" && normalizedStatus !== "VERIFIED") {
       const err = new Error(
-        `Cannot transition order ${order.order_number} from 'VERIFIED' to '${normalizedStatus}'. Verified payments cannot be silently downgraded; issue a formal refund if funds were returned.`
+        `Cannot transition order ${order.order_number} from 'VERIFIED' to '${normalizedStatus}'. Verified payments cannot be modified or downgraded through this endpoint. Process a formal refund if funds were returned.`
       );
       err.code = "INVALID_PAYMENT_TRANSITION";
       err.statusCode = 400;
       throw err;
     }
 
-    const verifiedAmount = amount !== undefined && amount !== null
-      ? parseFloat(amount)
-      : parseFloat(order.total_amount);
+    // 4. Amount parsing and safe money/decimal validation
+    const orderPayable = parseFloat(order.total_amount);
+    const orderPayableCents = Math.round(orderPayable * 100);
 
-    if (isNaN(verifiedAmount) || verifiedAmount <= 0) {
-      const err = new Error(`Invalid verified amount '${amount}'. Must be a positive number.`);
-      err.code = "INVALID_AMOUNT";
-      err.statusCode = 400;
-      throw err;
+    let verifiedAmount;
+    if (amount !== undefined && amount !== null) {
+      const parsed = Number(amount);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        const err = new Error(`Invalid verified amount '${amount}'. Must be a positive finite number.`);
+        err.code = "INVALID_AMOUNT";
+        err.statusCode = 400;
+        throw err;
+      }
+      verifiedAmount = Math.round(parsed * 100) / 100;
+    } else {
+      verifiedAmount = orderPayable;
     }
 
-    // 1. Record or update payments ledger entry
+    const verifiedAmountCents = Math.round(verifiedAmount * 100);
+
+    // When status is VERIFIED, full amount equality is strictly required
+    if (normalizedStatus === "VERIFIED") {
+      if (verifiedAmountCents < orderPayableCents) {
+        const err = new Error(
+          `Cannot verify payment for order ${order.order_number}. Verified amount (₹${verifiedAmount.toFixed(2)}) is less than total payable amount (₹${orderPayable.toFixed(2)}). Partial payments cannot be marked as VERIFIED.`
+        );
+        err.code = "PAYMENT_AMOUNT_INSUFFICIENT";
+        err.statusCode = 400;
+        throw err;
+      }
+
+      if (verifiedAmountCents > orderPayableCents) {
+        const err = new Error(
+          `Cannot verify payment for order ${order.order_number}. Verified amount (₹${verifiedAmount.toFixed(2)}) exceeds total payable amount (₹${orderPayable.toFixed(2)}).`
+        );
+        err.code = "PAYMENT_AMOUNT_EXCEEDS_TOTAL";
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
+    // 5. Idempotency Key Handling & Duplicate Submission Protection
+    if (cleanIdempotencyKey) {
+      const existingKeyRes = await client.query(
+        `SELECT * FROM payments WHERE idempotency_key = $1 FOR UPDATE;`,
+        [cleanIdempotencyKey]
+      );
+
+      if (existingKeyRes.rows.length > 0) {
+        const priorPayment = existingKeyRes.rows[0];
+
+        // Conflict check 1: Same key used on another order
+        if (priorPayment.order_id !== order.id) {
+          const err = new Error(
+            `Idempotency key '${cleanIdempotencyKey}' has already been used for another order (${priorPayment.order_id}).`
+          );
+          err.code = "IDEMPOTENCY_KEY_CONFLICT";
+          err.statusCode = 409;
+          throw err;
+        }
+
+        // Conflict check 2: Same key, same order, but different payload
+        const priorAmountCents = Math.round(parseFloat(priorPayment.amount) * 100);
+        const priorUtr = priorPayment.gateway_payment_id || null;
+        const incomingUtr = cleanUtr || null;
+
+        const isPayloadIdentical =
+          priorPayment.status === normalizedStatus &&
+          priorPayment.payment_method === normalizedMethod &&
+          priorAmountCents === verifiedAmountCents &&
+          priorUtr === incomingUtr;
+
+        if (!isPayloadIdentical) {
+          const err = new Error(
+            `Idempotency key '${cleanIdempotencyKey}' was previously submitted for order ${order.order_number} with a different payload.`
+          );
+          err.code = "IDEMPOTENCY_KEY_CONFLICT";
+          err.statusCode = 409;
+          throw err;
+        }
+
+        // Exact match with same idempotency key: return original successful result
+        await client.query("COMMIT;");
+        const existingOrder = await getOrderById(orderId, { isAdmin: true, skipAuthCheck: true });
+        return {
+          success: true,
+          orderId: order.id,
+          orderNumber: order.order_number,
+          previousPaymentStatus: previousStatus,
+          paymentStatus: normalizedStatus,
+          paymentMethod: normalizedMethod,
+          amount: verifiedAmount,
+          transactionReference: priorUtr,
+          alreadyVerified: normalizedStatus === "VERIFIED",
+          message: `Payment status is already '${normalizedStatus}'. Request handled idempotently with verified idempotency key.`,
+          order: existingOrder.order,
+          payment: existingOrder.payment || null,
+        };
+      }
+    } else {
+      // No idempotency key provided: check if order is already in target status with identical payment
+      if (previousStatus === normalizedStatus) {
+        const existingPayRes = await client.query(
+          `SELECT * FROM payments WHERE order_id = $1 ORDER BY created_at DESC LIMIT 1 FOR UPDATE;`,
+          [order.id]
+        );
+        if (existingPayRes.rows.length > 0) {
+          const p = existingPayRes.rows[0];
+          const priorAmountCents = Math.round(parseFloat(p.amount) * 100);
+          const priorUtr = p.gateway_payment_id || null;
+          const incomingUtr = cleanUtr || null;
+
+          if (
+            p.payment_method === normalizedMethod &&
+            priorAmountCents === verifiedAmountCents &&
+            (incomingUtr === null || priorUtr === incomingUtr)
+          ) {
+            await client.query("COMMIT;");
+            const existingOrder = await getOrderById(orderId, { isAdmin: true, skipAuthCheck: true });
+            return {
+              success: true,
+              orderId: order.id,
+              orderNumber: order.order_number,
+              previousPaymentStatus: previousStatus,
+              paymentStatus: normalizedStatus,
+              paymentMethod: normalizedMethod,
+              amount: verifiedAmount,
+              transactionReference: priorUtr,
+              alreadyVerified: normalizedStatus === "VERIFIED",
+              message: `Payment status is already '${normalizedStatus}'. Request handled idempotently.`,
+              order: existingOrder.order,
+              payment: existingOrder.payment || null,
+            };
+          }
+        }
+      }
+    }
+
+    // 6. Proactive check for duplicate transaction reference / UTR across other orders
+    if (cleanUtr) {
+      const dupUtrRes = await client.query(
+        `SELECT id, order_id FROM payments WHERE gateway_payment_id = $1 AND order_id != $2 LIMIT 1;`,
+        [cleanUtr, order.id]
+      );
+
+      if (dupUtrRes.rows.length > 0) {
+        const err = new Error(
+          `Transaction reference (UTR) '${cleanUtr}' has already been recorded for another order.`
+        );
+        err.code = "DUPLICATE_TRANSACTION_REFERENCE";
+        err.statusCode = 409;
+        throw err;
+      }
+    }
+
+    // 7. Upsert payments ledger entry
     const existingPayRes = await client.query(
-      `SELECT id FROM payments WHERE order_id = $1 ORDER BY created_at DESC LIMIT 1 FOR UPDATE;`,
+      `SELECT id, idempotency_key FROM payments WHERE order_id = $1 ORDER BY created_at DESC LIMIT 1 FOR UPDATE;`,
       [order.id]
     );
 
     let paymentRecord = null;
-    const cleanIdempotency = idempotencyKey
-      ? idempotencyKey.trim()
-      : `pay_${order.id}_${normalizedStatus.toLowerCase()}_${Date.now()}`;
+    const finalIdempotencyKey = cleanIdempotencyKey ||
+      (existingPayRes.rows.length > 0 && existingPayRes.rows[0].idempotency_key
+        ? existingPayRes.rows[0].idempotency_key
+        : `pay_${order.id}_${normalizedStatus.toLowerCase()}_${Date.now()}`);
 
     if (existingPayRes.rows.length > 0) {
       const updatePayRes = await client.query(
@@ -1536,14 +1673,16 @@ async function adminVerifyOrderPayment(orderId, verifyData, adminUser, ipAddress
              payment_method = $2,
              amount = $3,
              gateway_payment_id = COALESCE($4, gateway_payment_id),
-             verified_at = $5
-         WHERE id = $6
+             idempotency_key = $5,
+             verified_at = $6
+         WHERE id = $7
          RETURNING *;`,
         [
           normalizedStatus,
           normalizedMethod,
           verifiedAmount,
-          transactionReference || null,
+          cleanUtr,
+          finalIdempotencyKey,
           normalizedStatus === "VERIFIED" ? new Date() : null,
           existingPayRes.rows[0].id,
         ]
@@ -1569,15 +1708,15 @@ async function adminVerifyOrderPayment(orderId, verifyData, adminUser, ipAddress
           verifiedAmount,
           order.currency || "INR",
           normalizedStatus,
-          transactionReference || null,
-          cleanIdempotency,
+          cleanUtr,
+          finalIdempotencyKey,
           normalizedStatus === "VERIFIED" ? new Date() : null,
         ]
       );
       paymentRecord = insertPaymentRes.rows[0];
     }
 
-    // 2. Update orders payment_status
+    // 8. Update orders table
     await client.query(
       `UPDATE orders
        SET payment_status = $1, updated_at = CURRENT_TIMESTAMP
@@ -1585,10 +1724,10 @@ async function adminVerifyOrderPayment(orderId, verifyData, adminUser, ipAddress
       [normalizedStatus, order.id]
     );
 
-    // 3. Record in order_status_history
-    const historyNote = notes
+    // 9. Record in order_status_history
+    const historyNote = notes && typeof notes === "string" && notes.trim()
       ? notes.trim()
-      : `Payment status updated from ${previousStatus} to ${normalizedStatus} via manual verification (${normalizedMethod}${transactionReference ? ` - Ref: ${transactionReference}` : ""}).`;
+      : `Payment status updated from ${previousStatus} to ${normalizedStatus} via manual verification (${normalizedMethod}${cleanUtr ? ` - Ref: ${cleanUtr}` : ""}).`;
 
     await client.query(
       `INSERT INTO order_status_history (
@@ -1603,7 +1742,7 @@ async function adminVerifyOrderPayment(orderId, verifyData, adminUser, ipAddress
       [order.id, previousStatus, normalizedStatus, adminUser.id || null, historyNote]
     );
 
-    // 4. Record in audit_logs
+    // 10. Record in immutable audit_logs
     const actorRole = (adminUser.roles && adminUser.roles[0]) || "operator";
     await client.query(
       `INSERT INTO audit_logs (
@@ -1629,7 +1768,7 @@ async function adminVerifyOrderPayment(orderId, verifyData, adminUser, ipAddress
             payment_status: normalizedStatus,
             payment_method: normalizedMethod,
             amount: verifiedAmount,
-            transaction_reference: transactionReference || null,
+            transaction_reference: cleanUtr,
           },
           notes: notes || null,
         }),
@@ -1648,7 +1787,7 @@ async function adminVerifyOrderPayment(orderId, verifyData, adminUser, ipAddress
       paymentStatus: normalizedStatus,
       paymentMethod: normalizedMethod,
       amount: verifiedAmount,
-      transactionReference: transactionReference || null,
+      transactionReference: cleanUtr,
       alreadyVerified: false,
       message: `Payment status for order ${order.order_number} successfully updated to '${normalizedStatus}'.`,
       order: enriched.order,
@@ -1667,6 +1806,27 @@ async function adminVerifyOrderPayment(orderId, verifyData, adminUser, ipAddress
     };
   } catch (err) {
     await client.query("ROLLBACK;");
+
+    // Catch PostgreSQL unique violation 23505 safely
+    if (err.code === "23505") {
+      if (err.constraint === "uq_payments_gateway_id" || (err.message && err.message.includes("gateway_payment_id"))) {
+        const customErr = new Error(
+          `Transaction reference (UTR) '${cleanUtr || transactionReference}' has already been recorded for another payment.`
+        );
+        customErr.code = "DUPLICATE_TRANSACTION_REFERENCE";
+        customErr.statusCode = 409;
+        throw customErr;
+      }
+      if (err.constraint === "payments_idempotency_key_key" || (err.message && err.message.includes("idempotency_key"))) {
+        const customErr = new Error(
+          `Idempotency key '${cleanIdempotencyKey || idempotencyKey}' conflict: already used in payment ledger.`
+        );
+        customErr.code = "IDEMPOTENCY_KEY_CONFLICT";
+        customErr.statusCode = 409;
+        throw customErr;
+      }
+    }
+
     throw err;
   } finally {
     client.release();

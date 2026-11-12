@@ -43,7 +43,7 @@
       "up_file": "migrations/004_add_payment_status_type_to_history.sql",
       "down_file": "migrations/004_add_payment_status_type_to_history_rollback.sql",
       "sha256": "5F69D6E5BBEF8C64AC6633369EA74B0BB394FC1F36205CBE5B100DB990413969",
-      "down_sha256": "3BBC87FE4106784CE9E98A19313A220FB85833D7BD54C972D69827CD0BB2ACA0",
+      "down_sha256": "A83878143C3A46EDDC67667E48B76D8D889F4E0895AC475F440CCAD84A0B3624",
       "table_count": 50,
       "description": "Expand order_status_history chk_status_type to accept 'payment' transitions and seed orders:verify_payment permission for super_operator and artist_divya"
     }

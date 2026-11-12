@@ -207,16 +207,75 @@ async function runSuite() {
   // ---------------------------------------------------------------------------
   console.log("\n🧪 6. Financial Ledger & Revenue Integrity");
   try {
-    const overview = await getEnrichedOverview();
-    assert.ok(overview.financials, "Overview must contain financials object");
-    assert.strictEqual(typeof overview.financials.paidRevenue, "number", "paidRevenue must be a number");
-    assert.strictEqual(typeof overview.financials.pendingPaymentAmount, "number", "pendingPaymentAmount must be a number");
+    const overviewBefore = await getEnrichedOverview();
+    assert.ok(overviewBefore.financials, "Overview must contain financials object");
+    assert.strictEqual(typeof overviewBefore.financials.paidRevenue, "number", "paidRevenue must be a number");
+    assert.strictEqual(typeof overviewBefore.financials.pendingPaymentAmount, "number", "pendingPaymentAmount must be a number");
 
-    // Verify all current database orders are pending and paidRevenue is 0
-    assert.strictEqual(overview.financials.paidRevenue, 0, "Current paid revenue must be exactly 0 (no fake revenue)");
-    assert.ok(overview.financials.pendingPaymentAmount > 0, "Pending orders must be accounted for in pendingPaymentAmount");
+    // 1. Verify ledger calculation consistency directly against PostgreSQL ground truth
+    const ledgerCheck = await query(
+      `SELECT
+         COALESCE(SUM(CASE WHEN payment_status IN ('VERIFIED', 'PAID') AND order_status != 'CANCELLED' THEN total_amount ELSE 0 END), 0.00) AS expected_paid,
+         COALESCE(SUM(CASE WHEN payment_status IN ('PENDING', 'UNPAID', 'INITIATED', 'MANUAL_VERIFY_REQ') AND order_status != 'CANCELLED' THEN total_amount ELSE 0 END), 0.00) AS expected_pending
+       FROM orders;`
+    );
+    const expectedPaid = parseFloat(ledgerCheck.rows[0].expected_paid);
+    const expectedPending = parseFloat(ledgerCheck.rows[0].expected_pending);
 
-    pass("Paid revenue strictly excludes unpaid and cancelled orders (Paid: ₹0.00, Pipeline: verified)");
+    assert.strictEqual(overviewBefore.financials.paidRevenue, expectedPaid, "Overview paidRevenue must exactly match PostgreSQL verified orders total");
+    assert.strictEqual(overviewBefore.financials.pendingPaymentAmount, expectedPending, "Overview pendingPaymentAmount must exactly match PostgreSQL pending orders total");
+
+    // 2. Data Isolation & Ledger Safety Test:
+    // Create an isolated unpaid PENDING order to assert that unpaid orders NEVER increase paidRevenue
+    const testOrderNum = `NBD-SEC-REV-${Date.now()}`;
+    const testAmount = 888.00;
+    const insertRes = await query(
+      `INSERT INTO orders (
+         order_number, customer_name, customer_phone, customer_email,
+         shipping_address, order_status, payment_status, fulfilment_status,
+         subtotal, discount_amount, shipping_fee, total_amount, currency
+       ) VALUES ($1, 'Security Test Customer', '+919811009988', 'sec@test.com',
+         '{"addressLine1":"Security Test Suite"}', 'PENDING', 'PENDING', 'UNFULFILLED',
+         $2, 0.00, 0.00, $2, 'INR')
+       RETURNING id;`,
+      [testOrderNum, testAmount]
+    );
+    const testOrderId = insertRes.rows[0].id;
+
+    try {
+      const overviewAfterPending = await getEnrichedOverview();
+      // Paid revenue MUST NOT increase when an unpaid order is placed (no fake or accidental revenue)
+      assert.strictEqual(
+        overviewAfterPending.financials.paidRevenue,
+        expectedPaid,
+        "Paid revenue must strictly remain unchanged when an unpaid order is created"
+      );
+      // Pending pipeline MUST increase by exactly the new order's amount
+      assert.strictEqual(
+        Math.round(overviewAfterPending.financials.pendingPaymentAmount * 100),
+        Math.round((expectedPending + testAmount) * 100),
+        "Pending payment amount must increase by exactly the unpaid order total"
+      );
+
+      // Cancel the order: cancelled orders must be strictly excluded from both paid revenue and pipeline
+      await query(`UPDATE orders SET order_status = 'CANCELLED' WHERE id = $1;`, [testOrderId]);
+      const overviewAfterCancel = await getEnrichedOverview();
+      assert.strictEqual(
+        overviewAfterCancel.financials.paidRevenue,
+        expectedPaid,
+        "Paid revenue must remain unchanged when order is cancelled"
+      );
+      assert.strictEqual(
+        Math.round(overviewAfterCancel.financials.pendingPaymentAmount * 100),
+        Math.round(expectedPending * 100),
+        "Pending pipeline must return to baseline when order is cancelled"
+      );
+    } finally {
+      // Clean up test order
+      await query(`DELETE FROM orders WHERE id = $1;`, [testOrderId]);
+    }
+
+    pass("Paid revenue strictly excludes unpaid and cancelled orders (Isolated delta verified, DB ground truth matches)");
   } catch (e) { fail("Revenue ledger", e); }
 
   // ---------------------------------------------------------------------------
