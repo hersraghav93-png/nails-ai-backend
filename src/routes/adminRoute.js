@@ -51,6 +51,7 @@ const {
   updateAppointmentStatus,
   getAppointmentById,
 } = require("../services/bookingService");
+const { getDailyAnalytics } = require("../services/analyticsService");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
@@ -1409,6 +1410,28 @@ router.post("/communications/notifications/:id/retry", requirePermission("Update
     return res.status(status).json({
       error: err.message || "Failed to retry notification.",
       code: "ADMIN_NOTIFICATION_RETRY_FAILED",
+    });
+  }
+});
+
+/**
+ * GET /api/admin/analytics/summary
+ * Protected: requires admin authentication (artist_divya or super_operator).
+ * Retrieves daily aggregated privacy-safe operational event metrics.
+ */
+router.get("/analytics/summary", async (req, res) => {
+  try {
+    const days = parseInt(req.query.days, 10) || 14;
+    const history = await getDailyAnalytics(days);
+    return res.json({
+      status: "success",
+      days,
+      analytics: history,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      error: err.message || "Failed to retrieve analytics summary.",
+      code: "ANALYTICS_QUERY_FAILED",
     });
   }
 });

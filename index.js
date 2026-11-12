@@ -20,6 +20,7 @@ const productRouter = require("./src/routes/productRoute");
 const portfolioRouter = require("./src/routes/portfolioRoute");
 const reviewRouter = require("./src/routes/reviewRoute");
 const webhookRouter = require("./src/routes/webhookRoute");
+const analyticsRouter = require("./src/routes/analyticsRoute");
 
 const { closePool } = require("./src/db/pool");
 const { getCorsMiddleware } = require("./src/middleware/corsConfig");
@@ -67,6 +68,7 @@ app.use("/api/products", productRouter);
 app.use("/api/portfolio", portfolioRouter);
 app.use("/api/reviews", reviewRouter);
 app.use("/api/webhooks", webhookRouter);
+app.use("/api/analytics", analyticsRouter);
 app.use("/api", bookingRouter);
 
 // 4. Start Server (if executed directly)

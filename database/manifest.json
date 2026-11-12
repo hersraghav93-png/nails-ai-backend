@@ -56,6 +56,17 @@
       "down_sha256": "7E98711E67A3742CA4D74E59728C3F6BEB2ACF6F57EFA63DC1579D5DB697E5E3",
       "table_count": 51,
       "description": "Customer reviews table with unapproved default status, timestamp triggers, and reviews:moderate permission for super_operator and artist_divya"
+    },
+    {
+      "id": "006",
+      "name": "006_analytics_daily_events",
+      "up_file": "migrations/006_analytics_daily_events.sql",
+      "down_file": "migrations/006_analytics_daily_events_rollback.sql",
+      "sha256": "905C3EF572FBE2AB1E88ED45C7E7220281E9C2DDA033B8A0F7B9D2D5A3258FD9",
+      "down_sha256": "B8C143331B735BB499FDFB09DAA5CF40E20F7CF51EEFDB026F06264CE3BEBCA0",
+      "table_count": 52,
+      "status": "AUTHORED_PENDING_APPROVAL",
+      "description": "Daily privacy-safe analytics aggregation table for 6 core events with date/name primary key; authored and reviewed; awaiting explicit user approval before database execution"
     }
   ],
   "seeds": [

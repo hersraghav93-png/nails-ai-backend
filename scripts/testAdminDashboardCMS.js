@@ -111,7 +111,7 @@ async function runAdminDashboardCMSSuite() {
       if (token === "token_divya") {
         return {
           uid: "divya_lead_artist_cms_test",
-          phone_number: "+917827437985",
+          phone_number: "+918447391310",
           roles: ["artist_divya"],
         };
       }
@@ -145,10 +145,10 @@ async function runAdminDashboardCMSSuite() {
     // Ensure test operators exist with required permissions
     await query(
       `INSERT INTO users (firebase_uid, phone, is_active)
-       VALUES ('divya_lead_artist_cms_test', '+917827437985', TRUE)
-       ON CONFLICT (phone) DO UPDATE SET firebase_uid = EXCLUDED.firebase_uid;`
+       VALUES ('divya_lead_artist_cms_test', '+918447391310', TRUE)
+       ON CONFLICT (firebase_uid) DO UPDATE SET phone = EXCLUDED.phone;`
     );
-    const divyaRes = await query(`SELECT id FROM users WHERE phone = '+917827437985';`);
+    const divyaRes = await query(`SELECT id FROM users WHERE phone = '+918447391310';`);
     const divyaId = divyaRes.rows[0].id;
     await query(`INSERT INTO user_roles (user_id, role_id) VALUES ($1, 'artist_divya') ON CONFLICT DO NOTHING;`, [divyaId]);
 

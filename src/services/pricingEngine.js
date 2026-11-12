@@ -32,7 +32,15 @@ function isFestiveOfferEligible(product) {
   if (!product || product.is_available === false || product.is_archived === true) {
     return false;
   }
-  // All press-on sets qualify
+  // Non-promotional flag: explicit opt-out
+  if (product.is_promotional === false || product.is_festive_eligible === false) {
+    return false;
+  }
+  // Category restriction: only press-on / handmade sets qualify
+  const category = (product.category_id || product.category || "").toLowerCase();
+  if (category && !["wedding", "party", "daily", "work", "press-on", "press_on", "presson", "handmade"].includes(category)) {
+    return false;
+  }
   return true;
 }
 
