@@ -620,13 +620,21 @@ async function runAdminOpsTestSuite() {
     // =========================================================================
     console.log("\n🧪 7. Business Settings & Audit Logs");
 
-    await itAsync("Admin can list operational business settings", async () => {
+    await itAsync("Super Operator can list operational business settings", async () => {
       const res = await makeRequest("/api/admin/settings", {
-        headers: { Authorization: "Bearer token_divya" },
+        headers: { Authorization: "Bearer token_super" },
       });
       assert.strictEqual(res.status, 200);
       assert.ok(Array.isArray(res.body.settings));
       assert.ok(res.body.settings.length >= 9);
+    });
+
+    await itAsync("Lead Artist Divya is rejected from operational business settings with 403 (Missing config:edit)", async () => {
+      const res = await makeRequest("/api/admin/settings", {
+        headers: { Authorization: "Bearer token_divya" },
+      });
+      assert.strictEqual(res.status, 403);
+      assert.strictEqual(res.body.code, "FORBIDDEN_PERMISSION");
     });
 
     await itAsync("Super Operator can view audit logs verifying admin changes", async () => {

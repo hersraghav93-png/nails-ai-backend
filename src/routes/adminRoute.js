@@ -1284,10 +1284,10 @@ router.get("/staff", requirePermission("Manage Staff Accounts"), async (req, res
 
 /**
  * GET /api/admin/roles
- * Requires 'View Catalog' or 'View Orders' permission.
+ * Requires 'catalog:view' permission.
  * Returns role definitions and permission mappings.
  */
-router.get("/roles", requirePermission("View Catalog"), async (req, res) => {
+router.get("/roles", requirePermission("catalog:view"), async (req, res) => {
   try {
     const matrix = await getRolePermissionMatrix();
 
@@ -1310,10 +1310,10 @@ router.get("/roles", requirePermission("View Catalog"), async (req, res) => {
 
 /**
  * GET /api/admin/settings
- * Requires 'View Catalog' permission.
+ * Requires 'Edit Platform Configuration' permission (super_operator).
  * Lists operational business settings.
  */
-router.get("/settings", requirePermission("View Catalog"), async (req, res) => {
+router.get("/settings", requirePermission("Edit Platform Configuration"), async (req, res) => {
   try {
     const settings = await listBusinessSettings();
 

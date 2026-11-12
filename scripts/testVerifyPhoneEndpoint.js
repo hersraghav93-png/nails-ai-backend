@@ -57,6 +57,9 @@ async function run() {
     const testUid = "firebase_uid_divya_real_" + Date.now();
     const testPhone = "+918447391310";
 
+    const custPhone = `+919811${String(Date.now()).slice(-6)}`;
+    const custUid = `customer_uid_${Date.now()}`;
+
     setTestTokenVerifier(async (token) => {
       if (token === "divya_valid_token") {
         return {
@@ -67,8 +70,8 @@ async function run() {
       }
       if (token === "unauthorized_customer_token") {
         return {
-          uid: "customer_uid_" + Date.now(),
-          phone_number: "+919999988888",
+          uid: custUid,
+          phone_number: custPhone,
           auth_time: Math.floor(Date.now() / 1000),
         };
       }
@@ -117,9 +120,10 @@ async function run() {
     assert.strictEqual(resForbidden.body.code, "FORBIDDEN_ROLE");
     console.log("  PASS: Unauthorized customer blocked with 403 FORBIDDEN_ROLE");
 
-    // 5. Clean up the test UID from the database to keep staging pristine
+    // 5. Clean up the test UID and customer record from the database to keep staging pristine
     await query("UPDATE users SET firebase_uid = NULL WHERE phone = $1;", [testPhone]);
-    console.log("5. Pristine cleanup: Reset Divya's firebase_uid back to NULL.");
+    await query("DELETE FROM users WHERE phone = $1;", [custPhone]);
+    console.log("5. Pristine cleanup: Reset Divya's firebase_uid back to NULL and deleted test customer.");
 
     console.log("\nALL VERIFY-PHONE & ADMIN TESTS PASSED PERFECTLY!");
   } finally {
