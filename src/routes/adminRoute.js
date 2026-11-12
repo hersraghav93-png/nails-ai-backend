@@ -1123,9 +1123,9 @@ router.post("/uploads", requirePermission("Edit Catalog Details"), async (req, r
       });
     }
 
-    if (buffer.length > 5 * 1024 * 1024) {
+    if (buffer.length > 2 * 1024 * 1024) {
       return res.status(400).json({
-        error: "Image exceeds maximum allowed size of 5MB.",
+        error: "Image exceeds maximum allowed size of 2MB.",
         code: "FILE_TOO_LARGE",
       });
     }

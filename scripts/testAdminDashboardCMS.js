@@ -63,11 +63,18 @@ function makeRequest(endpoint, options = {}) {
   });
 }
 
+let totalTests = 0;
+let passedTests = 0;
+let failedTests = 0;
+
 async function itAsync(name, fn) {
+  totalTests++;
   try {
     await fn();
+    passedTests++;
     console.log(`  ✅ [PASS] ${name}`);
   } catch (err) {
+    failedTests++;
     console.error(`  ❌ [FAIL] ${name}`);
     console.error(err);
     throw err;
@@ -507,11 +514,11 @@ async function runAdminDashboardCMSSuite() {
     });
 
     // -------------------------------------------------------------------------
-    // 4. PERSISTENT ZERO-COST IMAGE STORAGE
+    // 4. TEMPORARY STAGING MEDIA UPLOADS & SECURITY VALIDATION
     // -------------------------------------------------------------------------
-    console.log("\n🧪 4. Zero-Cost Persistent Media Uploads");
+    console.log("\n🧪 4. Temporary Staging Media Uploads & Security Validation");
 
-    await itAsync("Lead Artist Divya can upload Base64 photograph; stored persistently", async () => {
+    await itAsync("Lead Artist Divya can upload Base64 photograph; stored in temporary staging uploads", async () => {
       // 1x1 transparent PNG Base64
       const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
@@ -529,13 +536,34 @@ async function runAdminDashboardCMSSuite() {
       assert.ok(res.body.url.startsWith("/uploads/upload_"));
       assert.strictEqual(res.body.mimeType, "image/png");
 
-      // Verify file exists on disk
+      // Verify file exists on local staging disk
       const diskPath = path.join(__dirname, "../uploads", res.body.filename);
-      assert.ok(fs.existsSync(diskPath), "Uploaded file must exist on disk");
+      assert.ok(fs.existsSync(diskPath), "Uploaded file must exist in temporary staging uploads directory");
 
       // Verify file is accessible via HTTP static route
       const staticRes = await makeRequest(res.body.url);
       assert.strictEqual(staticRes.status, 200);
+    });
+
+    await itAsync("Upload rejects file exceeding 2MB limit", async () => {
+      // Create a 2.1 MB buffer with JPEG header
+      const oversizedBuf = Buffer.alloc(2.1 * 1024 * 1024);
+      oversizedBuf[0] = 0xff;
+      oversizedBuf[1] = 0xd8;
+      oversizedBuf[2] = 0xff;
+      oversizedBuf[3] = 0xe0;
+
+      const res = await makeRequest("/api/admin/uploads", {
+        method: "POST",
+        headers: { Authorization: "Bearer token_divya" },
+        body: {
+          contentType: "image/jpeg",
+          data: oversizedBuf.toString("base64"),
+        },
+      });
+
+      assert.strictEqual(res.status, 400);
+      assert.strictEqual(res.body.code, "FILE_TOO_LARGE");
     });
 
     await itAsync("Upload rejects unsupported MIME types", async () => {
@@ -643,7 +671,7 @@ async function runAdminDashboardCMSSuite() {
   }
 
   console.log("\n==================================================================");
-  console.log("🏁 ADMIN DASHBOARD & CMS SUITE COMPLETE: All Tests Passed!");
+  console.log(`🏁 ADMIN DASHBOARD & CMS SUITE COMPLETE: ${passedTests}/${totalTests} Passed (Failed: ${failedTests}, Skipped: 0)`);
   console.log("==================================================================\n");
 }
 
