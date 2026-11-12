@@ -1,11 +1,11 @@
 {
   "project": "Nails by Divya",
-  "phase": "Phase 4B.1 - Service Catalog Reconciliation",
-  "version": "1.3.1",
+  "phase": "Phase 5.1A - Secure Payment Verification Foundation",
+  "version": "1.4.0",
   "target_engine": "PostgreSQL 15+",
   "status": "FINAL_VERIFIED_FOUNDATION",
-  "created_at": "2026-11-11T07:35:00Z",
-  "git_branch": "feature/phase-1c-auth-and-accounts",
+  "created_at": "2026-11-12T15:30:00Z",
+  "git_branch": "feature/phase-4a-staging-integration",
   "migrations": [
     {
       "id": "001",
@@ -36,6 +36,16 @@
       "down_sha256": "2803E50E29F62FF896343076E5B7BA4B6002B875CB4489885C8BFADE5DDD0F8C",
       "table_count": 50,
       "description": "Reconcile salon service catalog base prices and descriptions with approved canonical offerings (gel_extensions, natural_overlay, power_polish)"
+    },
+    {
+      "id": "004",
+      "name": "004_add_payment_status_type_to_history",
+      "up_file": "migrations/004_add_payment_status_type_to_history.sql",
+      "down_file": "migrations/004_add_payment_status_type_to_history_rollback.sql",
+      "sha256": "5F69D6E5BBEF8C64AC6633369EA74B0BB394FC1F36205CBE5B100DB990413969",
+      "down_sha256": "3BBC87FE4106784CE9E98A19313A220FB85833D7BD54C972D69827CD0BB2ACA0",
+      "table_count": 50,
+      "description": "Expand order_status_history chk_status_type to accept 'payment' transitions and seed orders:verify_payment permission for super_operator and artist_divya"
     }
   ],
   "seeds": [
@@ -83,9 +93,11 @@
     "seeds/004_faqs.sql",
     "seeds/005_business_settings.sql",
     "migrations/002_add_firebase_uid.sql",
-    "migrations/003_reconcile_service_catalog_pricing.sql"
+    "migrations/003_reconcile_service_catalog_pricing.sql",
+    "migrations/004_add_payment_status_type_to_history.sql"
   ],
   "rollback_order": [
+    "migrations/004_add_payment_status_type_to_history_rollback.sql",
     "migrations/003_reconcile_service_catalog_pricing_rollback.sql",
     "migrations/002_add_firebase_uid_rollback.sql",
     "migrations/001_initial_schema_rollback.sql"

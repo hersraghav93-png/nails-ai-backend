@@ -751,6 +751,32 @@ async function runCommerceTestSuite() {
     });
 
     await itAsync("Admin can update order status and write to order_status_history & audit_logs", async () => {
+      // 1. Business safety check: Cannot move to IN_PRODUCTION before payment is verified
+      const unverifiedRes = await makeRequest(`/api/admin/orders/${createdOrderId}/status`, {
+        method: "PATCH",
+        headers: { Authorization: "Bearer token_admin" },
+        body: {
+          order_status: "IN_PRODUCTION",
+        },
+      });
+      assert.strictEqual(unverifiedRes.status, 400);
+      assert.strictEqual(unverifiedRes.body.code, "PAYMENT_NOT_VERIFIED");
+
+      // 2. Admin verifies payment
+      const payRes = await makeRequest(`/api/admin/orders/${createdOrderId}/payment-status`, {
+        method: "PATCH",
+        headers: { Authorization: "Bearer token_admin" },
+        body: {
+          paymentStatus: "VERIFIED",
+          paymentMethod: "manual_upi",
+          transactionReference: `UPI-COMMERCE-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          notes: "Payment verified in studio account.",
+        },
+      });
+      assert.strictEqual(payRes.status, 200);
+      assert.strictEqual(payRes.body.paymentStatus, "VERIFIED");
+
+      // 3. Now move to IN_PRODUCTION and READY_FOR_DISPATCH
       const patchRes = await makeRequest(`/api/admin/orders/${createdOrderId}/status`, {
         method: "PATCH",
         headers: { Authorization: "Bearer token_admin" },

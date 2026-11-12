@@ -338,6 +338,9 @@ async function runCommunicationsSuite() {
 
     const mockAdmin = { id: orderRes.rows[0].user_id, roles: ["super_operator"] };
 
+    // Verify payment before dispatching (enforces business safety rule)
+    await query(`UPDATE orders SET payment_status = 'VERIFIED' WHERE id = $1;`, [testOrderId]);
+
     // Update status to DISPATCHED with carrier information
     const updated = await adminUpdateOrderStatus(
       testOrderId,

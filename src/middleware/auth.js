@@ -156,6 +156,8 @@ const PERMISSION_ALIASES = {
   "Toggle Availability": "catalog:toggle_availability",
   "View Orders": "orders:read",
   "Update Order Fulfillment": "orders:update_status",
+  "Verify Payments": "orders:verify_payment",
+  "Verify Payment": "orders:verify_payment",
   "Process Refunds": "orders:refund",
   "View Bookings": "bookings:read",
   "Confirm or Decline Bookings": "bookings:approve_decline",

@@ -38,6 +38,7 @@ const { query } = require("../db/pool");
 const {
   adminListOrders,
   adminUpdateOrderStatus,
+  adminVerifyOrderPayment,
   getOrderById,
   cancelOrder,
 } = require("../services/orderService");
@@ -205,6 +206,7 @@ async function handleUpdateOrderStatus(req, res) {
       {
         orderStatus: req.body && (req.body.order_status || req.body.orderStatus),
         fulfilmentStatus: req.body && (req.body.fulfilment_status || req.body.fulfilmentStatus),
+        paymentStatus: req.body && (req.body.payment_status !== undefined ? req.body.payment_status : req.body.paymentStatus),
         courierName: req.body && (req.body.courier_name || req.body.courierName),
         trackingNumber: req.body && (req.body.tracking_number || req.body.trackingNumber),
         trackingUrl: req.body && (req.body.tracking_url || req.body.trackingUrl),
@@ -226,6 +228,50 @@ async function handleUpdateOrderStatus(req, res) {
     return res.status(status).json({
       error: err.message || "Failed to update order status.",
       code: err.code || "ADMIN_ORDER_UPDATE_FAILED",
+    });
+  }
+}
+
+/**
+ * Dedicated administrative payment verification endpoints.
+ * Requires 'Verify Payments' permission (super_operator, artist_divya).
+ *
+ * Supported paths:
+ * - PATCH /api/admin/orders/:orderId/payment-status
+ * - POST  /api/admin/orders/:orderId/payment-status
+ * - POST  /api/admin/orders/:orderId/verify-payment
+ */
+router.patch("/orders/:orderId/payment-status", requirePermission("Verify Payments"), handleVerifyPaymentStatus);
+router.put("/orders/:orderId/payment-status", requirePermission("Verify Payments"), handleVerifyPaymentStatus);
+router.post("/orders/:orderId/payment-status", requirePermission("Verify Payments"), handleVerifyPaymentStatus);
+router.post("/orders/:orderId/verify-payment", requirePermission("Verify Payments"), handleVerifyPaymentStatus);
+
+async function handleVerifyPaymentStatus(req, res) {
+  try {
+    const body = req.body || {};
+    const result = await adminVerifyOrderPayment(
+      req.params.orderId,
+      {
+        paymentStatus: body.payment_status || body.paymentStatus,
+        paymentMethod: body.payment_method || body.paymentMethod,
+        transactionReference: body.transaction_reference || body.transactionReference || body.reference || body.utr,
+        amount: body.amount,
+        notes: body.notes,
+        idempotencyKey: body.idempotency_key || body.idempotencyKey,
+      },
+      req.user,
+      req.ip
+    );
+
+    return res.status(200).json({
+      status: "success",
+      ...result,
+    });
+  } catch (err) {
+    const statusCode = err.statusCode || (err.code === "ORDER_NOT_FOUND" ? 404 : 400);
+    return res.status(statusCode).json({
+      error: err.message || "Failed to verify order payment.",
+      code: err.code || "PAYMENT_VERIFICATION_FAILED",
     });
   }
 }

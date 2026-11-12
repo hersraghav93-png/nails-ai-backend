@@ -321,6 +321,32 @@ async function runAdminOpsTestSuite() {
     });
 
     await itAsync("Admin can update order fulfillment status", async () => {
+      // 1. Business safety rule: cannot move to IN_PRODUCTION before payment is verified
+      const unverifiedRes = await makeRequest(`/api/admin/orders/${sampleOrderId}/status`, {
+        method: "PATCH",
+        headers: { Authorization: "Bearer token_divya" },
+        body: {
+          order_status: "IN_PRODUCTION",
+        },
+      });
+      assert.strictEqual(unverifiedRes.status, 400);
+      assert.strictEqual(unverifiedRes.body.code, "PAYMENT_NOT_VERIFIED");
+
+      // 2. Verify payment via dedicated endpoint
+      const payRes = await makeRequest(`/api/admin/orders/${sampleOrderId}/payment-status`, {
+        method: "PATCH",
+        headers: { Authorization: "Bearer token_divya" },
+        body: {
+          paymentStatus: "VERIFIED",
+          paymentMethod: "manual_upi",
+          transactionReference: `UPI-OPS-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          notes: "Lead Artist Divya confirmed funds in studio account.",
+        },
+      });
+      assert.strictEqual(payRes.status, 200);
+      assert.strictEqual(payRes.body.paymentStatus, "VERIFIED");
+
+      // 3. Now successfully advance to IN_PRODUCTION and READY_FOR_DISPATCH
       const res = await makeRequest(`/api/admin/orders/${sampleOrderId}/status`, {
         method: "PATCH",
         headers: { Authorization: "Bearer token_divya" },
@@ -584,7 +610,8 @@ async function runAdminOpsTestSuite() {
       assert.strictEqual(res.status, 200);
       assert.ok(Array.isArray(res.body.roles));
       assert.ok(Array.isArray(res.body.allPermissions));
-      assert.strictEqual(res.body.allPermissions.length, 15);
+      assert.strictEqual(res.body.allPermissions.length, 16);
+      assert.ok(res.body.allPermissions.some((p) => p.id === "orders:verify_payment"));
     });
 
     // =========================================================================

@@ -23,8 +23,9 @@
     "test:communications": "node scripts/testCommunications.js",
     "test:storefront": "node scripts/testStorefrontCustomerJourneys.js",
     "test:divv": "node scripts/testDivvQuality.js",
+    "test:payment": "node scripts/testPaymentVerification.js",
     "test:staging": "node scripts/testStagingIntegration.js",
-    "test": "node scripts/testBackend.js && node scripts/testAuth.js && node scripts/testCommerce.js && node scripts/testBookings.js && node scripts/testAdminOps.js && node scripts/testAuthIntegration.js && node scripts/testSecurityProductionReadiness.js && node scripts/testCommunications.js && node scripts/testStorefrontCustomerJourneys.js && node scripts/testDivvQuality.js && node scripts/testStagingIntegration.js"
+    "test": "node scripts/testBackend.js && node scripts/testAuth.js && node scripts/testCommerce.js && node scripts/testBookings.js && node scripts/testAdminOps.js && node scripts/testAuthIntegration.js && node scripts/testSecurityProductionReadiness.js && node scripts/testCommunications.js && node scripts/testStorefrontCustomerJourneys.js && node scripts/testDivvQuality.js && node scripts/testPaymentVerification.js && node scripts/testStagingIntegration.js"
   },
   "keywords": [
     "ai",

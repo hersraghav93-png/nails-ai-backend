@@ -650,6 +650,16 @@ async function getOrderById(orderId, authContext = {}) {
     [orderId, order.order_number]
   );
 
+  // Retrieve verified payment ledger record if present
+  const paymentRes = await query(
+    `SELECT id, payment_method, amount, currency, status, gateway_payment_id, verified_at, created_at
+     FROM payments
+     WHERE order_id = $1
+     ORDER BY created_at DESC
+     LIMIT 1;`,
+    [orderId]
+  );
+
   return {
     order: {
       id: order.id,
@@ -702,6 +712,16 @@ async function getOrderById(orderId, authContext = {}) {
       trackingUrl: shipmentRes.rows[0].tracking_url,
       dispatchedAt: shipmentRes.rows[0].dispatched_at,
       deliveredAt: shipmentRes.rows[0].delivered_at,
+    } : null,
+    payment: paymentRes.rows[0] ? {
+      id: paymentRes.rows[0].id,
+      paymentMethod: paymentRes.rows[0].payment_method,
+      amount: parseFloat(paymentRes.rows[0].amount),
+      currency: paymentRes.rows[0].currency,
+      status: paymentRes.rows[0].status,
+      transactionReference: paymentRes.rows[0].gateway_payment_id,
+      verifiedAt: paymentRes.rows[0].verified_at,
+      createdAt: paymentRes.rows[0].created_at,
     } : null,
     notifications: notificationsRes.rows.map((n) => ({
       id: n.id,
@@ -1047,6 +1067,16 @@ async function adminUpdateOrderStatus(orderId, updateData, adminUser, ipAddress 
   const resolvedTrackingUrl = trackingUrl || tracking_url || null;
   const resolvedDispatchedAt = dispatchedAt || dispatched_at || null;
 
+  // Strict boundary: General order status updates must never modify payment status
+  if (updateData.paymentStatus !== undefined || updateData.payment_status !== undefined) {
+    const err = new Error(
+      "Payment status cannot be updated via the general order status endpoint. Use the dedicated payment verification endpoint (PATCH /api/admin/orders/:orderId/payment-status)."
+    );
+    err.code = "PAYMENT_STATUS_SEPARATE_MUTATION";
+    err.statusCode = 400;
+    throw err;
+  }
+
   if (orderStatus && !ALLOWED_ORDER_STATUSES.includes(orderStatus)) {
     const err = new Error(
       `Invalid order status '${orderStatus}'. Allowed: ${ALLOWED_ORDER_STATUSES.join(", ")}.`
@@ -1086,6 +1116,28 @@ async function adminUpdateOrderStatus(orderId, updateData, adminUser, ipAddress 
     const order = orderRes.rows[0];
     const newOrderStatus = orderStatus || order.order_status;
     const newFulfilmentStatus = fulfilmentStatus || order.fulfilment_status;
+
+    // Business Safety Rule: Production and fulfilment progression require verified payment
+    const ADVANCED_ORDER_STATUSES = ["IN_PRODUCTION", "COMPLETED"];
+    const ADVANCED_FULFILMENT_STATUSES = ["READY_FOR_DISPATCH", "DISPATCHED", "DELIVERED"];
+
+    if (orderStatus && ADVANCED_ORDER_STATUSES.includes(newOrderStatus) && order.payment_status !== "VERIFIED") {
+      const err = new Error(
+        `Cannot move order ${order.order_number} to '${newOrderStatus}'. Payment status is currently '${order.payment_status}' (payment must be 'VERIFIED' before bespoke nail production begins).`
+      );
+      err.code = "PAYMENT_NOT_VERIFIED";
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (fulfilmentStatus && ADVANCED_FULFILMENT_STATUSES.includes(newFulfilmentStatus) && order.payment_status !== "VERIFIED") {
+      const err = new Error(
+        `Cannot advance fulfilment status to '${newFulfilmentStatus}' for order ${order.order_number}. Payment status is currently '${order.payment_status}' (payment must be 'VERIFIED' before order can be prepared or dispatched).`
+      );
+      err.code = "PAYMENT_NOT_VERIFIED";
+      err.statusCode = 400;
+      throw err;
+    }
 
     // Update order
     await client.query(
@@ -1314,6 +1366,313 @@ async function adminUpdateOrderStatus(orderId, updateData, adminUser, ipAddress 
   }
 }
 
+const ALLOWED_MANUAL_PAYMENT_STATUSES = [
+  "VERIFIED",
+  "FAILED",
+  "MANUAL_VERIFY_REQ",
+  "INITIATED",
+  "PENDING",
+];
+
+const ALLOWED_PAYMENT_METHODS = ["manual_upi", "cash", "razorpay"];
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Dedicated administrative payment verification operation.
+ * Manually updates the order payment status, records verified payment ledger record,
+ * appends to order_status_history, and creates an immutable audit log entry.
+ *
+ * @param {string} orderId UUID of target order
+ * @param {object} verifyData
+ * @param {string} verifyData.paymentStatus Target status e.g. 'VERIFIED', 'FAILED', 'MANUAL_VERIFY_REQ'
+ * @param {string} [verifyData.paymentMethod='manual_upi'] 'manual_upi' | 'cash' | 'razorpay'
+ * @param {string} [verifyData.transactionReference] Transaction ID / UPI UTR / Bank ref
+ * @param {number} [verifyData.amount] Verified amount in INR (defaults to order total_amount)
+ * @param {string} [verifyData.notes] Administrative notes explaining verification
+ * @param {string} [verifyData.idempotencyKey] Optional idempotency key
+ * @param {object} adminUser Authenticated user { id, roles, permissions }
+ * @param {string|null} [ipAddress=null] Client IP
+ * @returns {Promise<object>}
+ */
+async function adminVerifyOrderPayment(orderId, verifyData, adminUser, ipAddress = null) {
+  if (!orderId || !UUID_REGEX.test(orderId)) {
+    const err = new Error(`Invalid order ID format '${orderId}'. Must be a valid UUID.`);
+    err.code = "INVALID_ORDER_ID";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const {
+    paymentStatus,
+    paymentMethod = "manual_upi",
+    transactionReference = null,
+    amount,
+    notes,
+    idempotencyKey = null,
+  } = verifyData || {};
+
+  if (!paymentStatus || typeof paymentStatus !== "string") {
+    const err = new Error("Payment status is required.");
+    err.code = "PAYMENT_STATUS_REQUIRED";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const normalizedStatus = paymentStatus.toUpperCase().trim();
+  if (!ALLOWED_MANUAL_PAYMENT_STATUSES.includes(normalizedStatus)) {
+    const err = new Error(
+      `Invalid payment status '${paymentStatus}'. Allowed transitions: ${ALLOWED_MANUAL_PAYMENT_STATUSES.join(", ")}.`
+    );
+    err.code = "INVALID_PAYMENT_STATUS";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const normalizedMethod = (paymentMethod || "manual_upi").toLowerCase().trim();
+  if (!ALLOWED_PAYMENT_METHODS.includes(normalizedMethod)) {
+    const err = new Error(
+      `Invalid payment method '${paymentMethod}'. Allowed: ${ALLOWED_PAYMENT_METHODS.join(", ")}.`
+    );
+    err.code = "INVALID_PAYMENT_METHOD";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const pool = getPool();
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN;");
+
+    const orderRes = await client.query(
+      `SELECT * FROM orders WHERE id = $1 FOR UPDATE;`,
+      [orderId]
+    );
+
+    if (orderRes.rows.length === 0) {
+      const err = new Error(`Order '${orderId}' not found.`);
+      err.code = "ORDER_NOT_FOUND";
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const order = orderRes.rows[0];
+    const previousStatus = order.payment_status;
+
+    // Reject payment verification on cancelled orders
+    if (order.order_status === "CANCELLED") {
+      const err = new Error(
+        `Cannot verify payment for order ${order.order_number} because it has already been CANCELLED.`
+      );
+      err.code = "ORDER_ALREADY_CANCELLED";
+      err.statusCode = 400;
+      throw err;
+    }
+
+    // Terminal refund check
+    if (previousStatus === "REFUNDED") {
+      const err = new Error(
+        `Order ${order.order_number} is in terminal REFUNDED status and cannot be modified.`
+      );
+      err.code = "INVALID_PAYMENT_TRANSITION";
+      err.statusCode = 400;
+      throw err;
+    }
+
+    // Idempotency: repeated verification with the same status
+    if (previousStatus === normalizedStatus) {
+      await client.query("COMMIT;");
+      const existingOrder = await getOrderById(orderId, { isAdmin: true, skipAuthCheck: true });
+      return {
+        success: true,
+        orderId: order.id,
+        orderNumber: order.order_number,
+        previousPaymentStatus: previousStatus,
+        paymentStatus: normalizedStatus,
+        alreadyVerified: normalizedStatus === "VERIFIED",
+        message: `Payment status is already '${normalizedStatus}'. Request handled idempotently.`,
+        order: existingOrder.order,
+        payment: existingOrder.payment || null,
+      };
+    }
+
+    // State transition guards: VERIFIED cannot revert to PENDING or FAILED without formal refund
+    if (previousStatus === "VERIFIED" && (normalizedStatus === "PENDING" || normalizedStatus === "FAILED")) {
+      const err = new Error(
+        `Cannot transition order ${order.order_number} from 'VERIFIED' to '${normalizedStatus}'. Verified payments cannot be silently downgraded; issue a formal refund if funds were returned.`
+      );
+      err.code = "INVALID_PAYMENT_TRANSITION";
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const verifiedAmount = amount !== undefined && amount !== null
+      ? parseFloat(amount)
+      : parseFloat(order.total_amount);
+
+    if (isNaN(verifiedAmount) || verifiedAmount <= 0) {
+      const err = new Error(`Invalid verified amount '${amount}'. Must be a positive number.`);
+      err.code = "INVALID_AMOUNT";
+      err.statusCode = 400;
+      throw err;
+    }
+
+    // 1. Record or update payments ledger entry
+    const existingPayRes = await client.query(
+      `SELECT id FROM payments WHERE order_id = $1 ORDER BY created_at DESC LIMIT 1 FOR UPDATE;`,
+      [order.id]
+    );
+
+    let paymentRecord = null;
+    const cleanIdempotency = idempotencyKey
+      ? idempotencyKey.trim()
+      : `pay_${order.id}_${normalizedStatus.toLowerCase()}_${Date.now()}`;
+
+    if (existingPayRes.rows.length > 0) {
+      const updatePayRes = await client.query(
+        `UPDATE payments
+         SET status = $1,
+             payment_method = $2,
+             amount = $3,
+             gateway_payment_id = COALESCE($4, gateway_payment_id),
+             verified_at = $5
+         WHERE id = $6
+         RETURNING *;`,
+        [
+          normalizedStatus,
+          normalizedMethod,
+          verifiedAmount,
+          transactionReference || null,
+          normalizedStatus === "VERIFIED" ? new Date() : null,
+          existingPayRes.rows[0].id,
+        ]
+      );
+      paymentRecord = updatePayRes.rows[0];
+    } else {
+      const insertPaymentRes = await client.query(
+        `INSERT INTO payments (
+           order_id,
+           payment_method,
+           amount,
+           currency,
+           status,
+           gateway_payment_id,
+           idempotency_key,
+           verified_at,
+           created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+         RETURNING *;`,
+        [
+          order.id,
+          normalizedMethod,
+          verifiedAmount,
+          order.currency || "INR",
+          normalizedStatus,
+          transactionReference || null,
+          cleanIdempotency,
+          normalizedStatus === "VERIFIED" ? new Date() : null,
+        ]
+      );
+      paymentRecord = insertPaymentRes.rows[0];
+    }
+
+    // 2. Update orders payment_status
+    await client.query(
+      `UPDATE orders
+       SET payment_status = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2;`,
+      [normalizedStatus, order.id]
+    );
+
+    // 3. Record in order_status_history
+    const historyNote = notes
+      ? notes.trim()
+      : `Payment status updated from ${previousStatus} to ${normalizedStatus} via manual verification (${normalizedMethod}${transactionReference ? ` - Ref: ${transactionReference}` : ""}).`;
+
+    await client.query(
+      `INSERT INTO order_status_history (
+         order_id,
+         status_type,
+         from_status,
+         to_status,
+         actor_type,
+         actor_id,
+         notes
+       ) VALUES ($1, 'payment', $2, $3, 'operator', $4, $5);`,
+      [order.id, previousStatus, normalizedStatus, adminUser.id || null, historyNote]
+    );
+
+    // 4. Record in audit_logs
+    const actorRole = (adminUser.roles && adminUser.roles[0]) || "operator";
+    await client.query(
+      `INSERT INTO audit_logs (
+         actor_id,
+         actor_role,
+         action,
+         target_entity,
+         target_id,
+         diff,
+         ip_address
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+      [
+        adminUser.id || null,
+        actorRole,
+        normalizedStatus === "VERIFIED" ? "ORDER_PAYMENT_VERIFIED" : "ORDER_PAYMENT_STATUS_UPDATED",
+        "orders",
+        order.id,
+        JSON.stringify({
+          previous: {
+            payment_status: previousStatus,
+          },
+          updated: {
+            payment_status: normalizedStatus,
+            payment_method: normalizedMethod,
+            amount: verifiedAmount,
+            transaction_reference: transactionReference || null,
+          },
+          notes: notes || null,
+        }),
+        formatInetIp(ipAddress),
+      ]
+    );
+
+    await client.query("COMMIT;");
+
+    const enriched = await getOrderById(order.id, { isAdmin: true, skipAuthCheck: true });
+    return {
+      success: true,
+      orderId: order.id,
+      orderNumber: order.order_number,
+      previousPaymentStatus: previousStatus,
+      paymentStatus: normalizedStatus,
+      paymentMethod: normalizedMethod,
+      amount: verifiedAmount,
+      transactionReference: transactionReference || null,
+      alreadyVerified: false,
+      message: `Payment status for order ${order.order_number} successfully updated to '${normalizedStatus}'.`,
+      order: enriched.order,
+      payment: paymentRecord
+        ? {
+            id: paymentRecord.id,
+            paymentMethod: paymentRecord.payment_method,
+            amount: parseFloat(paymentRecord.amount),
+            currency: paymentRecord.currency,
+            status: paymentRecord.status,
+            transactionReference: paymentRecord.gateway_payment_id,
+            verifiedAt: paymentRecord.verified_at,
+            createdAt: paymentRecord.created_at,
+          }
+        : null,
+    };
+  } catch (err) {
+    await client.query("ROLLBACK;");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   validateAndFormatPhone,
   validateCustomerDetails,
@@ -1324,4 +1683,5 @@ module.exports = {
   cancelOrder,
   adminListOrders,
   adminUpdateOrderStatus,
+  adminVerifyOrderPayment,
 };
