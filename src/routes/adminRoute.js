@@ -51,12 +51,25 @@ const {
   updateAppointmentStatus,
   getAppointmentById,
 } = require("../services/bookingService");
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
 const {
   getEnrichedOverview,
   listCustomers,
   getCustomerDetails,
   listAdminProducts,
   toggleProductAvailability,
+  createAdminProduct,
+  updateAdminProduct,
+  archiveAdminProduct,
+  addProductImage,
+  deleteProductImage,
+  listAdminPortfolio,
+  createAdminPortfolio,
+  updateAdminPortfolio,
+  togglePortfolioAvailability,
+  deleteAdminPortfolio,
   listAdminServices,
   toggleServiceAvailability,
   listStaffAccounts,
@@ -64,6 +77,10 @@ const {
   listBusinessSettings,
   listAuditLogs,
 } = require("../services/adminService");
+const {
+  adminListReviews,
+  adminModerateReview,
+} = require("../services/reviewService");
 const {
   listNotifications,
   retryNotification,
@@ -639,7 +656,10 @@ async function handleToggleProductAvailability(req, res) {
     return res.json({
       status: "success",
       message: "Product availability updated successfully.",
-      product: result,
+      product: {
+        ...result,
+        isAvailable: result.is_available,
+      },
     });
   } catch (err) {
     const status = err.statusCode || 400;
@@ -649,6 +669,426 @@ async function handleToggleProductAvailability(req, res) {
     });
   }
 }
+
+/**
+ * POST /api/admin/products
+ * Requires 'Edit Catalog Details' permission.
+ * Creates a new handcrafted press-on set in the catalog.
+ */
+router.post("/products", requirePermission("Edit Catalog Details"), async (req, res) => {
+  try {
+    const product = await createAdminProduct(req.body, req.user, req.ip);
+    return res.status(201).json({
+      status: "success",
+      message: "Product created successfully.",
+      product,
+    });
+  } catch (err) {
+    const status = err.statusCode || 400;
+    return res.status(status).json({
+      error: err.message || "Failed to create product.",
+      code: err.code || "ADMIN_PRODUCT_CREATE_FAILED",
+    });
+  }
+});
+
+/**
+ * PUT /api/admin/products/:productId
+ * Requires 'Edit Catalog Details' permission.
+ * Updates an existing catalog product.
+ */
+router.put("/products/:productId", requirePermission("Edit Catalog Details"), handleUpdateProduct);
+router.patch("/products/:productId", requirePermission("Edit Catalog Details"), handleUpdateProduct);
+
+async function handleUpdateProduct(req, res) {
+  try {
+    const product = await updateAdminProduct(req.params.productId, req.body, req.user, req.ip);
+    return res.json({
+      status: "success",
+      message: "Product updated successfully.",
+      product,
+    });
+  } catch (err) {
+    const status = err.statusCode || 400;
+    return res.status(status).json({
+      error: err.message || "Failed to update product.",
+      code: err.code || "ADMIN_PRODUCT_UPDATE_FAILED",
+    });
+  }
+}
+
+/**
+ * POST /api/admin/products/:productId/archive
+ * Requires 'Edit Catalog Details' permission.
+ * Soft archives a catalog product.
+ */
+router.post("/products/:productId/archive", requirePermission("Edit Catalog Details"), handleArchiveProduct);
+router.delete("/products/:productId", requirePermission("Edit Catalog Details"), handleArchiveProduct);
+
+async function handleArchiveProduct(req, res) {
+  try {
+    const product = await archiveAdminProduct(req.params.productId, req.user, req.ip);
+    return res.json({
+      status: "success",
+      message: "Product archived successfully.",
+      product,
+    });
+  } catch (err) {
+    const status = err.statusCode || 400;
+    return res.status(status).json({
+      error: err.message || "Failed to archive product.",
+      code: err.code || "ADMIN_PRODUCT_ARCHIVE_FAILED",
+    });
+  }
+}
+
+/**
+ * POST /api/admin/products/:productId/images
+ * Requires 'Edit Catalog Details' permission.
+ * Adds an image to a product gallery.
+ */
+router.post("/products/:productId/images", requirePermission("Edit Catalog Details"), async (req, res) => {
+  try {
+    const image = await addProductImage(req.params.productId, req.body, req.user, req.ip);
+    return res.status(201).json({
+      status: "success",
+      message: "Product image added successfully.",
+      image,
+    });
+  } catch (err) {
+    const status = err.statusCode || 400;
+    return res.status(status).json({
+      error: err.message || "Failed to add product image.",
+      code: err.code || "ADMIN_PRODUCT_IMAGE_ADD_FAILED",
+    });
+  }
+});
+
+/**
+ * DELETE /api/admin/products/:productId/images/:imageId
+ * Requires 'Edit Catalog Details' permission.
+ * Deletes an image from a product gallery.
+ */
+router.delete("/products/:productId/images/:imageId", requirePermission("Edit Catalog Details"), async (req, res) => {
+  try {
+    const result = await deleteProductImage(req.params.productId, req.params.imageId, req.user, req.ip);
+    return res.json({
+      status: "success",
+      message: "Product image deleted successfully.",
+      ...result,
+    });
+  } catch (err) {
+    const status = err.statusCode || 400;
+    return res.status(status).json({
+      error: err.message || "Failed to delete product image.",
+      code: err.code || "ADMIN_PRODUCT_IMAGE_DELETE_FAILED",
+    });
+  }
+});
+
+// =============================================================================
+// PORTFOLIO CMS ENDPOINTS
+// =============================================================================
+
+/**
+ * GET /api/admin/portfolio
+ * Requires 'View Catalog' permission.
+ * Lists all portfolio designs for administrative management.
+ */
+router.get("/portfolio", requirePermission("View Catalog"), async (req, res) => {
+  try {
+    const result = await listAdminPortfolio({
+      category: req.query.category,
+      search: req.query.search,
+      limit: req.query.limit,
+      offset: req.query.offset,
+    });
+    return res.json({
+      status: "success",
+      ...result,
+    });
+  } catch (err) {
+    const status = err.statusCode || 500;
+    return res.status(status).json({
+      error: err.message || "Failed to list portfolio artworks.",
+      code: "ADMIN_PORTFOLIO_LIST_FAILED",
+    });
+  }
+});
+
+/**
+ * POST /api/admin/portfolio
+ * Requires 'Edit Catalog Details' permission.
+ * Creates a new portfolio design artwork.
+ */
+router.post("/portfolio", requirePermission("Edit Catalog Details"), async (req, res) => {
+  try {
+    const artwork = await createAdminPortfolio(req.body, req.user, req.ip);
+    return res.status(201).json({
+      status: "success",
+      message: "Portfolio artwork created successfully.",
+      artwork,
+    });
+  } catch (err) {
+    const status = err.statusCode || 400;
+    return res.status(status).json({
+      error: err.message || "Failed to create portfolio artwork.",
+      code: err.code || "ADMIN_PORTFOLIO_CREATE_FAILED",
+    });
+  }
+});
+
+/**
+ * PUT /api/admin/portfolio/:id
+ * Requires 'Edit Catalog Details' permission.
+ * Updates an existing portfolio artwork.
+ */
+router.put("/portfolio/:id", requirePermission("Edit Catalog Details"), handleUpdatePortfolio);
+router.patch("/portfolio/:id", requirePermission("Edit Catalog Details"), handleUpdatePortfolio);
+
+async function handleUpdatePortfolio(req, res) {
+  try {
+    const artwork = await updateAdminPortfolio(req.params.id, req.body, req.user, req.ip);
+    return res.json({
+      status: "success",
+      message: "Portfolio artwork updated successfully.",
+      artwork,
+    });
+  } catch (err) {
+    const status = err.statusCode || 400;
+    return res.status(status).json({
+      error: err.message || "Failed to update portfolio artwork.",
+      code: err.code || "ADMIN_PORTFOLIO_UPDATE_FAILED",
+    });
+  }
+}
+
+/**
+ * PATCH /api/admin/portfolio/:id/availability
+ * Requires 'Toggle Availability' permission.
+ * Toggles a portfolio design's public active status.
+ */
+router.patch("/portfolio/:id/availability", requirePermission("Toggle Availability"), async (req, res) => {
+  try {
+    const isActive = req.body && (req.body.is_active !== undefined ? req.body.is_active : req.body.is_available);
+    const artwork = await togglePortfolioAvailability(req.params.id, isActive, req.user, req.ip);
+    return res.json({
+      status: "success",
+      message: "Portfolio artwork availability updated.",
+      artwork,
+    });
+  } catch (err) {
+    const status = err.statusCode || 400;
+    return res.status(status).json({
+      error: err.message || "Failed to toggle portfolio availability.",
+      code: err.code || "ADMIN_PORTFOLIO_TOGGLE_FAILED",
+    });
+  }
+});
+
+/**
+ * DELETE /api/admin/portfolio/:id
+ * Requires 'Edit Catalog Details' permission.
+ * Deletes a portfolio artwork.
+ */
+router.delete("/portfolio/:id", requirePermission("Edit Catalog Details"), async (req, res) => {
+  try {
+    const result = await deleteAdminPortfolio(req.params.id, req.user, req.ip);
+    return res.json({
+      status: "success",
+      message: "Portfolio artwork deleted successfully.",
+      ...result,
+    });
+  } catch (err) {
+    const status = err.statusCode || 400;
+    return res.status(status).json({
+      error: err.message || "Failed to delete portfolio artwork.",
+      code: err.code || "ADMIN_PORTFOLIO_DELETE_FAILED",
+    });
+  }
+});
+
+// =============================================================================
+// REVIEWS MODERATION ENDPOINTS
+// =============================================================================
+
+/**
+ * GET /api/admin/reviews
+ * Requires 'Moderate Customer Reviews' permission.
+ * Lists customer reviews with moderation filter: all, pending, approved, rejected.
+ */
+router.get("/reviews", requirePermission("Moderate Customer Reviews"), async (req, res) => {
+  try {
+    const result = await adminListReviews({
+      status: req.query.status,
+      limit: req.query.limit,
+      offset: req.query.offset,
+    });
+    return res.json({
+      status: "success",
+      ...result,
+    });
+  } catch (err) {
+    const status = err.statusCode || 500;
+    return res.status(status).json({
+      error: err.message || "Failed to list customer reviews for moderation.",
+      code: "ADMIN_REVIEWS_LIST_FAILED",
+    });
+  }
+});
+
+/**
+ * PATCH /api/admin/reviews/:id/approve
+ * Requires 'Moderate Customer Reviews' permission.
+ * Approves a customer review for publication on the public storefront.
+ */
+router.patch("/reviews/:id/approve", requirePermission("Moderate Customer Reviews"), handleApproveReview);
+router.post("/reviews/:id/approve", requirePermission("Moderate Customer Reviews"), handleApproveReview);
+
+async function handleApproveReview(req, res) {
+  try {
+    const review = await adminModerateReview(
+      req.params.id,
+      { isApproved: true, notes: req.body && req.body.notes },
+      req.user,
+      req.ip
+    );
+    return res.json({
+      status: "success",
+      message: "Customer review approved and published.",
+      review,
+    });
+  } catch (err) {
+    const status = err.statusCode || 400;
+    return res.status(status).json({
+      error: err.message || "Failed to approve review.",
+      code: err.code || "ADMIN_REVIEW_APPROVE_FAILED",
+    });
+  }
+}
+
+/**
+ * PATCH /api/admin/reviews/:id/reject
+ * Requires 'Moderate Customer Reviews' permission.
+ * Declines a customer review.
+ */
+router.patch("/reviews/:id/reject", requirePermission("Moderate Customer Reviews"), handleRejectReview);
+router.post("/reviews/:id/reject", requirePermission("Moderate Customer Reviews"), handleRejectReview);
+
+async function handleRejectReview(req, res) {
+  try {
+    const review = await adminModerateReview(
+      req.params.id,
+      { isApproved: false, notes: req.body && (req.body.notes || req.body.reason) },
+      req.user,
+      req.ip
+    );
+    return res.json({
+      status: "success",
+      message: "Customer review rejected.",
+      review,
+    });
+  } catch (err) {
+    const status = err.statusCode || 400;
+    return res.status(status).json({
+      error: err.message || "Failed to reject review.",
+      code: err.code || "ADMIN_REVIEW_REJECT_FAILED",
+    });
+  }
+}
+
+// =============================================================================
+// PERSISTENT MEDIA UPLOADS
+// =============================================================================
+
+/**
+ * POST /api/admin/uploads
+ * Requires 'Edit Catalog Details' permission.
+ * Uploads a photograph and stores it persistently in the uploads directory.
+ * Returns a permanent, non-transient URL.
+ */
+router.post("/uploads", requirePermission("Edit Catalog Details"), async (req, res) => {
+  try {
+    const { filename, contentType, content_type, data, image } = req.body || {};
+
+    let mimeType = contentType || content_type;
+    let base64Data = data;
+
+    // Handle data URL (e.g. data:image/png;base64,iVBORw0KGgo...)
+    if (image && typeof image === "string" && image.startsWith("data:")) {
+      const match = image.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+      if (match) {
+        mimeType = match[1];
+        base64Data = match[2];
+      }
+    } else if (typeof data === "string" && data.startsWith("data:")) {
+      const match = data.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+      if (match) {
+        mimeType = match[1];
+        base64Data = match[2];
+      }
+    }
+
+    if (!base64Data) {
+      return res.status(400).json({
+        error: "Missing image data. Provide base64 encoded data or data URL.",
+        code: "INVALID_UPLOAD_PAYLOAD",
+      });
+    }
+
+    const ALLOWED_MIME = {
+      "image/jpeg": "jpg",
+      "image/jpg": "jpg",
+      "image/png": "png",
+      "image/webp": "webp",
+    };
+
+    const ext = ALLOWED_MIME[mimeType ? mimeType.toLowerCase() : ""];
+    if (!ext) {
+      return res.status(400).json({
+        error: "Unsupported image format. Allowed formats: JPEG, PNG, WEBP.",
+        code: "UNSUPPORTED_MEDIA_TYPE",
+      });
+    }
+
+    const buffer = Buffer.from(base64Data, "base64");
+    if (buffer.length > 5 * 1024 * 1024) {
+      return res.status(400).json({
+        error: "Image exceeds maximum allowed size of 5MB.",
+        code: "FILE_TOO_LARGE",
+      });
+    }
+
+    // Content-addressed filename
+    const hash = crypto.createHash("sha256").update(buffer).digest("hex").slice(0, 16);
+    const targetFilename = `upload_${hash}.${ext}`;
+    const uploadDir = path.join(__dirname, "../../uploads");
+
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+
+    const targetPath = path.join(uploadDir, targetFilename);
+    fs.writeFileSync(targetPath, buffer);
+
+    const publicUrl = `/uploads/${targetFilename}`;
+
+    return res.status(201).json({
+      status: "success",
+      message: "Image uploaded successfully.",
+      url: publicUrl,
+      filename: targetFilename,
+      size: buffer.length,
+      mimeType,
+    });
+  } catch (err) {
+    console.error("❌ [Admin Upload Error]:", err.message);
+    return res.status(500).json({
+      error: "Failed to process image upload.",
+      code: "UPLOAD_PROCESSING_ERROR",
+    });
+  }
+});
 
 /**
  * GET /api/admin/services

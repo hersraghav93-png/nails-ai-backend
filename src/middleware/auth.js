@@ -167,6 +167,8 @@ const PERMISSION_ALIASES = {
   "View Financial Analytics": "financials:view",
   "View Audit Logs": "audit:view",
   "Edit Platform Configuration": "config:edit",
+  "Moderate Customer Reviews": "reviews:moderate",
+  "Moderate Reviews": "reviews:moderate",
 };
 
 /**

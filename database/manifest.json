@@ -1,10 +1,10 @@
 {
   "project": "Nails by Divya",
-  "phase": "Phase 5.1A - Secure Payment Verification Foundation",
-  "version": "1.4.0",
+  "phase": "Phase 5.1B - Nails by Divya Admin Dashboard & Content Management",
+  "version": "1.5.0",
   "target_engine": "PostgreSQL 15+",
   "status": "FINAL_VERIFIED_FOUNDATION",
-  "created_at": "2026-11-12T15:30:00Z",
+  "created_at": "2026-11-12T16:30:00Z",
   "git_branch": "feature/phase-4a-staging-integration",
   "migrations": [
     {
@@ -46,6 +46,16 @@
       "down_sha256": "A83878143C3A46EDDC67667E48B76D8D889F4E0895AC475F440CCAD84A0B3624",
       "table_count": 50,
       "description": "Expand order_status_history chk_status_type to accept 'payment' transitions and seed orders:verify_payment permission for super_operator and artist_divya"
+    },
+    {
+      "id": "005",
+      "name": "005_add_customer_reviews",
+      "up_file": "migrations/005_add_customer_reviews.sql",
+      "down_file": "migrations/005_add_customer_reviews_rollback.sql",
+      "sha256": "6CBDF2094D0E9EFB0E0D7E36B3FD85CB1A2624E81DE87A8FAA10F2A7CF44A9C0",
+      "down_sha256": "7E98711E67A3742CA4D74E59728C3F6BEB2ACF6F57EFA63DC1579D5DB697E5E3",
+      "table_count": 51,
+      "description": "Customer reviews table with unapproved default status, timestamp triggers, and reviews:moderate permission for super_operator and artist_divya"
     }
   ],
   "seeds": [

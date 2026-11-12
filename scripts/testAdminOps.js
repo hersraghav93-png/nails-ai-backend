@@ -610,8 +610,9 @@ async function runAdminOpsTestSuite() {
       assert.strictEqual(res.status, 200);
       assert.ok(Array.isArray(res.body.roles));
       assert.ok(Array.isArray(res.body.allPermissions));
-      assert.strictEqual(res.body.allPermissions.length, 16);
+      assert.strictEqual(res.body.allPermissions.length, 17);
       assert.ok(res.body.allPermissions.some((p) => p.id === "orders:verify_payment"));
+      assert.ok(res.body.allPermissions.some((p) => p.id === "reviews:moderate"));
     });
 
     // =========================================================================

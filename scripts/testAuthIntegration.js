@@ -272,8 +272,8 @@ async function runTests() {
     assert.strictEqual(resMe.status, 200, "Super Operator me must return 200");
     assert.strictEqual(resMe.data.admin.phone, superPhone, "Phone must match database record");
     assert.deepStrictEqual(resMe.data.admin.roles, ["super_operator"], "Role must be super_operator");
-    assert.strictEqual(resMe.data.admin.permissions.length, 16, "Super Operator must have 16 permissions (including orders:verify_payment)");
-    pass("GET /api/admin/me derives verified operator identity & exact 16 permissions from PostgreSQL");
+    assert.strictEqual(resMe.data.admin.permissions.length, 17, "Super Operator must have 17 permissions (including orders:verify_payment and reviews:moderate)");
+    pass("GET /api/admin/me derives verified operator identity & exact 17 permissions from PostgreSQL");
   } catch (e) { fail("Server-side identity derivation", e); }
 
   try {

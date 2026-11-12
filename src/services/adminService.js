@@ -998,6 +998,843 @@ async function listAuditLogs({ limit = 50, offset = 0, action = null, targetEnti
   };
 }
 
+// =============================================================================
+// 9. PRODUCT CMS OPERATIONS
+// =============================================================================
+
+/**
+ * Creates a new handcrafted press-on set in the catalog.
+ *
+ * @param {object} productData
+ * @param {object} adminUser
+ * @param {string} [ipAddress]
+ * @returns {Promise<object>} Created product with images and variants
+ */
+async function createAdminProduct(productData, adminUser, ipAddress) {
+  const {
+    name,
+    sku,
+    slug,
+    categoryId,
+    category_id,
+    basePrice,
+    base_price,
+    description,
+    craftsmanshipDetails,
+    craftsmanship_details,
+    isMadeToOrder = true,
+    is_made_to_order = true,
+    isAvailable = true,
+    is_available = true,
+    images = [],
+    variants = [],
+  } = productData || {};
+
+  const cleanName = (name || "").trim();
+  const cleanSku = (sku || "").trim().toUpperCase();
+  const catId = (categoryId || category_id || "").trim();
+  const price = basePrice !== undefined ? Number(basePrice) : Number(base_price);
+  const cleanDesc = (description || "").trim();
+  const cleanCraft = (craftsmanshipDetails || craftsmanship_details || "").trim() || null;
+  const madeToOrder = isMadeToOrder !== undefined ? Boolean(isMadeToOrder) : Boolean(is_made_to_order);
+  const available = isAvailable !== undefined ? Boolean(isAvailable) : Boolean(is_available);
+
+  if (!cleanName || cleanName.length < 3) {
+    const err = new Error("Product name is required (minimum 3 characters).");
+    err.code = "INVALID_PRODUCT_NAME";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (!cleanSku || cleanSku.length < 2) {
+    const err = new Error("Product SKU is required.");
+    err.code = "INVALID_PRODUCT_SKU";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (!catId) {
+    const err = new Error("Product category is required.");
+    err.code = "INVALID_PRODUCT_CATEGORY";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (!Number.isFinite(price) || price < 0) {
+    const err = new Error("Base price must be a non-negative number.");
+    err.code = "INVALID_BASE_PRICE";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (!cleanDesc) {
+    const err = new Error("Product description is required.");
+    err.code = "INVALID_PRODUCT_DESCRIPTION";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // Derive unique slug if not passed
+  let cleanSlug = (slug || "").trim().toLowerCase();
+  if (!cleanSlug) {
+    cleanSlug = cleanName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "");
+  }
+
+  // Verify category exists
+  const catCheck = await query(`SELECT id FROM product_categories WHERE id = $1;`, [catId]);
+  if (catCheck.rows.length === 0) {
+    const err = new Error(`Product category '${catId}' does not exist.`);
+    err.code = "CATEGORY_NOT_FOUND";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // Insert product
+  const insertProductRes = await query(
+    `INSERT INTO products (
+       sku, name, slug, category_id, base_price, description,
+       craftsmanship_details, is_made_to_order, is_available, is_archived
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE)
+     RETURNING *;`,
+    [
+      cleanSku,
+      cleanName,
+      cleanSlug,
+      catId,
+      price,
+      cleanDesc,
+      cleanCraft,
+      madeToOrder,
+      available,
+    ]
+  );
+  const product = insertProductRes.rows[0];
+
+  // Insert product images
+  const insertedImages = [];
+  if (Array.isArray(images) && images.length > 0) {
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i];
+      const imgUrl = typeof img === "string" ? img.trim() : (img.imageUrl || img.image_url || "").trim();
+      const imgAlt = typeof img === "object" ? (img.altText || img.alt_text || cleanName).trim() : cleanName;
+      const isHero = typeof img === "object" ? Boolean(img.isHero || img.is_hero || i === 0) : i === 0;
+
+      if (imgUrl) {
+        const imgRes = await query(
+          `INSERT INTO product_images (product_id, image_url, alt_text, is_hero, display_order)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (product_id, image_url) DO UPDATE SET is_hero = EXCLUDED.is_hero
+           RETURNING *;`,
+          [product.id, imgUrl, imgAlt, isHero, i]
+        );
+        insertedImages.push(imgRes.rows[0]);
+      }
+    }
+  }
+
+  // Insert standard variants if provided or seed default shapes
+  const insertedVariants = [];
+  const variantList = Array.isArray(variants) && variants.length > 0 ? variants : [
+    { shape: "Almond", length: "Medium", sizingMode: "custom_or_preset" },
+    { shape: "Square", length: "Medium", sizingMode: "custom_or_preset" },
+    { shape: "Coffin", length: "Medium", sizingMode: "custom_or_preset" },
+    { shape: "Stiletto", length: "Medium", sizingMode: "custom_or_preset" },
+  ];
+
+  for (const v of variantList) {
+    const shape = (v.shape || "Almond").trim();
+    const length = (v.length || "Medium").trim();
+    const sizingMode = (v.sizingMode || v.sizing_mode || "custom_or_preset").trim();
+    const priceAdjustment = Number(v.priceAdjustment || v.price_adjustment || 0);
+
+    const vRes = await query(
+      `INSERT INTO product_variants (product_id, shape, length, sizing_mode, price_adjustment, is_available)
+       VALUES ($1, $2, $3, $4, $5, TRUE)
+       RETURNING *;`,
+      [product.id, shape, length, sizingMode, priceAdjustment]
+    );
+    insertedVariants.push(vRes.rows[0]);
+  }
+
+  // Immutable audit log
+  const actorRole = (adminUser.roles && adminUser.roles[0]) || "operator";
+  const actorId = isValidUuid(adminUser.id) ? adminUser.id : null;
+  await query(
+    `INSERT INTO audit_logs (actor_id, actor_role, action, target_entity, target_id, diff, ip_address)
+     VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+    [
+      actorId,
+      actorRole,
+      "product:create",
+      "products",
+      product.id,
+      JSON.stringify({
+        sku: cleanSku,
+        name: cleanName,
+        base_price: price,
+        category_id: catId,
+      }),
+      formatInetIp(ipAddress),
+    ]
+  );
+
+  return {
+    ...product,
+    basePrice: parseFloat(product.base_price),
+    images: insertedImages,
+    variants: insertedVariants,
+  };
+}
+
+/**
+ * Updates an existing catalog product.
+ *
+ * @param {string} productId
+ * @param {object} updateData
+ * @param {object} adminUser
+ * @param {string} [ipAddress]
+ * @returns {Promise<object>} Updated product
+ */
+async function updateAdminProduct(productId, updateData, adminUser, ipAddress) {
+  if (!isValidUuid(productId)) {
+    const err = new Error("Invalid product ID. Must be a valid UUID.");
+    err.code = "INVALID_PRODUCT_ID";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const existingRes = await query(`SELECT * FROM products WHERE id = $1;`, [productId]);
+  if (existingRes.rows.length === 0) {
+    const err = new Error(`Product with ID '${productId}' not found.`);
+    err.code = "PRODUCT_NOT_FOUND";
+    err.statusCode = 404;
+    throw err;
+  }
+  const existing = existingRes.rows[0];
+
+  const {
+    name,
+    sku,
+    slug,
+    categoryId,
+    category_id,
+    basePrice,
+    base_price,
+    description,
+    craftsmanshipDetails,
+    craftsmanship_details,
+    isMadeToOrder,
+    is_made_to_order,
+    isAvailable,
+    is_available,
+    images,
+  } = updateData || {};
+
+  const cleanName = name !== undefined ? name.trim() : existing.name;
+  const cleanSku = sku !== undefined ? sku.trim().toUpperCase() : existing.sku;
+  const cleanSlug = slug !== undefined ? slug.trim().toLowerCase() : existing.slug;
+  const catId = categoryId || category_id !== undefined ? (categoryId || category_id).trim() : existing.category_id;
+  const price = basePrice !== undefined ? Number(basePrice) : (base_price !== undefined ? Number(base_price) : Number(existing.base_price));
+  const cleanDesc = description !== undefined ? description.trim() : existing.description;
+  const cleanCraft = craftsmanshipDetails !== undefined ? craftsmanshipDetails.trim() : (craftsmanship_details !== undefined ? craftsmanship_details.trim() : existing.craftsmanship_details);
+  const madeToOrder = isMadeToOrder !== undefined ? Boolean(isMadeToOrder) : (is_made_to_order !== undefined ? Boolean(is_made_to_order) : existing.is_made_to_order);
+  const available = isAvailable !== undefined ? Boolean(isAvailable) : (is_available !== undefined ? Boolean(is_available) : existing.is_available);
+
+  if (!Number.isFinite(price) || price < 0) {
+    const err = new Error("Base price must be a non-negative number.");
+    err.code = "INVALID_BASE_PRICE";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const updateRes = await query(
+    `UPDATE products
+     SET name = $1,
+         sku = $2,
+         slug = $3,
+         category_id = $4,
+         base_price = $5,
+         description = $6,
+         craftsmanship_details = $7,
+         is_made_to_order = $8,
+         is_available = $9,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $10
+     RETURNING *;`,
+    [
+      cleanName,
+      cleanSku,
+      cleanSlug,
+      catId,
+      price,
+      cleanDesc,
+      cleanCraft,
+      madeToOrder,
+      available,
+      productId,
+    ]
+  );
+  const updated = updateRes.rows[0];
+
+  // If new images provided, sync them
+  if (Array.isArray(images)) {
+    // If hero specified in new image list, handle it
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i];
+      const imgUrl = typeof img === "string" ? img.trim() : (img.imageUrl || img.image_url || "").trim();
+      const imgAlt = typeof img === "object" ? (img.altText || img.alt_text || cleanName).trim() : cleanName;
+      const isHero = typeof img === "object" ? Boolean(img.isHero || img.is_hero || i === 0) : i === 0;
+
+      if (imgUrl) {
+        if (isHero) {
+          await query(`UPDATE product_images SET is_hero = FALSE WHERE product_id = $1;`, [productId]);
+        }
+        await query(
+          `INSERT INTO product_images (product_id, image_url, alt_text, is_hero, display_order)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (product_id, image_url) DO UPDATE SET is_hero = EXCLUDED.is_hero, display_order = EXCLUDED.display_order;`,
+          [productId, imgUrl, imgAlt, isHero, i]
+        );
+      }
+    }
+  }
+
+  // Audit log
+  const actorRole = (adminUser.roles && adminUser.roles[0]) || "operator";
+  const actorId = isValidUuid(adminUser.id) ? adminUser.id : null;
+  await query(
+    `INSERT INTO audit_logs (actor_id, actor_role, action, target_entity, target_id, diff, ip_address)
+     VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+    [
+      actorId,
+      actorRole,
+      "product:update",
+      "products",
+      productId,
+      JSON.stringify({
+        previous: {
+          name: existing.name,
+          sku: existing.sku,
+          base_price: parseFloat(existing.base_price),
+          is_available: existing.is_available,
+        },
+        new: {
+          name: cleanName,
+          sku: cleanSku,
+          base_price: price,
+          is_available: available,
+        },
+      }),
+      formatInetIp(ipAddress),
+    ]
+  );
+
+  return {
+    ...updated,
+    basePrice: parseFloat(updated.base_price),
+  };
+}
+
+/**
+ * Soft archives a product so it no longer appears in storefront or active admin views,
+ * while preserving referential integrity for historic order snapshots.
+ *
+ * @param {string} productId
+ * @param {object} adminUser
+ * @param {string} [ipAddress]
+ * @returns {Promise<object>}
+ */
+async function archiveAdminProduct(productId, adminUser, ipAddress) {
+  if (!isValidUuid(productId)) {
+    const err = new Error("Invalid product ID. Must be a valid UUID.");
+    err.code = "INVALID_PRODUCT_ID";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const existingRes = await query(`SELECT * FROM products WHERE id = $1;`, [productId]);
+  if (existingRes.rows.length === 0) {
+    const err = new Error(`Product with ID '${productId}' not found.`);
+    err.code = "PRODUCT_NOT_FOUND";
+    err.statusCode = 404;
+    throw err;
+  }
+  const existing = existingRes.rows[0];
+
+  const updateRes = await query(
+    `UPDATE products
+     SET is_archived = TRUE,
+         is_available = FALSE,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $1
+     RETURNING *;`,
+    [productId]
+  );
+  const archived = updateRes.rows[0];
+
+  // Audit log
+  const actorRole = (adminUser.roles && adminUser.roles[0]) || "operator";
+  const actorId = isValidUuid(adminUser.id) ? adminUser.id : null;
+  await query(
+    `INSERT INTO audit_logs (actor_id, actor_role, action, target_entity, target_id, diff, ip_address)
+     VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+    [
+      actorId,
+      actorRole,
+      "product:archive",
+      "products",
+      productId,
+      JSON.stringify({
+        sku: existing.sku,
+        name: existing.name,
+        is_archived: true,
+      }),
+      formatInetIp(ipAddress),
+    ]
+  );
+
+  return {
+    ...archived,
+    basePrice: parseFloat(archived.base_price),
+  };
+}
+
+/**
+ * Adds an image to a product gallery.
+ *
+ * @param {string} productId
+ * @param {object} imageData
+ * @param {object} adminUser
+ * @param {string} [ipAddress]
+ * @returns {Promise<object>}
+ */
+async function addProductImage(productId, imageData, adminUser, ipAddress) {
+  if (!isValidUuid(productId)) {
+    const err = new Error("Invalid product ID.");
+    err.code = "INVALID_PRODUCT_ID";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const { imageUrl, image_url, altText, alt_text, isHero, is_hero } = imageData || {};
+  const url = (imageUrl || image_url || "").trim();
+  const alt = (altText || alt_text || "Nails by Divya press-on set").trim();
+  const hero = Boolean(isHero || is_hero);
+
+  if (!url) {
+    const err = new Error("Image URL is required.");
+    err.code = "INVALID_IMAGE_URL";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (hero) {
+    await query(`UPDATE product_images SET is_hero = FALSE WHERE product_id = $1;`, [productId]);
+  }
+
+  const res = await query(
+    `INSERT INTO product_images (product_id, image_url, alt_text, is_hero)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (product_id, image_url) DO UPDATE SET is_hero = EXCLUDED.is_hero, alt_text = EXCLUDED.alt_text
+     RETURNING *;`,
+    [productId, url, alt, hero]
+  );
+
+  return res.rows[0];
+}
+
+/**
+ * Deletes an image from a product gallery.
+ *
+ * @param {string} productId
+ * @param {string} imageId
+ * @param {object} adminUser
+ * @param {string} [ipAddress]
+ * @returns {Promise<object>}
+ */
+async function deleteProductImage(productId, imageId, adminUser, ipAddress) {
+  if (!isValidUuid(productId) || !isValidUuid(imageId)) {
+    const err = new Error("Invalid ID format.");
+    err.code = "INVALID_ID";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const imgCheck = await query(`SELECT * FROM product_images WHERE id = $1 AND product_id = $2;`, [imageId, productId]);
+  if (imgCheck.rows.length === 0) {
+    const err = new Error("Product image not found.");
+    err.code = "IMAGE_NOT_FOUND";
+    err.statusCode = 404;
+    throw err;
+  }
+  const wasHero = imgCheck.rows[0].is_hero;
+
+  await query(`DELETE FROM product_images WHERE id = $1;`, [imageId]);
+
+  // If deleted image was hero, assign hero to the first remaining image
+  if (wasHero) {
+    await query(
+      `UPDATE product_images
+       SET is_hero = TRUE
+       WHERE id = (
+         SELECT id FROM product_images
+         WHERE product_id = $1
+         ORDER BY display_order ASC
+         LIMIT 1
+       );`,
+      [productId]
+    );
+  }
+
+  return { success: true, deletedImageId: imageId };
+}
+
+// =============================================================================
+// 10. PORTFOLIO CMS OPERATIONS
+// =============================================================================
+
+/**
+ * Lists all portfolio designs for administrative management.
+ *
+ * @param {object} [options]
+ * @returns {Promise<object>}
+ */
+async function listAdminPortfolio(options = {}) {
+  const { category, search, limit = 100, offset = 0 } = options;
+  const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 200);
+  const safeOffset = Math.max(parseInt(offset, 10) || 0, 0);
+
+  const whereConditions = [];
+  const params = [];
+  let paramIdx = 1;
+
+  if (category && typeof category === "string" && category.trim()) {
+    whereConditions.push(`pd.category_id = $${paramIdx++}`);
+    params.push(category.trim());
+  }
+
+  if (search && typeof search === "string" && search.trim()) {
+    whereConditions.push(`(pd.name ILIKE $${paramIdx} OR pd.alt_text ILIKE $${paramIdx})`);
+    params.push(`%${search.trim()}%`);
+    paramIdx++;
+  }
+
+  const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(" AND ")}` : "";
+
+  const countRes = await query(`SELECT COUNT(*)::int AS total FROM portfolio_designs pd ${whereClause};`, params);
+  const total = countRes.rows[0] ? countRes.rows[0].total : 0;
+
+  const res = await query(
+    `SELECT
+       pd.id,
+       pd.design_number,
+       pd.name,
+       pd.category_id,
+       pc.name AS category_name,
+       pd.image_url,
+       pd.alt_text,
+       pd.is_active,
+       pd.created_at
+     FROM portfolio_designs pd
+     JOIN portfolio_categories pc ON pc.id = pd.category_id
+     ${whereClause}
+     ORDER BY pd.design_number ASC
+     LIMIT $${paramIdx++} OFFSET $${paramIdx++};`,
+    [...params, safeLimit, safeOffset]
+  );
+
+  const catRes = await query(`SELECT id, name, description FROM portfolio_categories ORDER BY id ASC;`);
+
+  return {
+    artworks: res.rows,
+    categories: catRes.rows,
+    total,
+    limit: safeLimit,
+    offset: safeOffset,
+  };
+}
+
+/**
+ * Creates a new portfolio design entry.
+ *
+ * @param {object} data
+ * @param {object} adminUser
+ * @param {string} [ipAddress]
+ * @returns {Promise<object>}
+ */
+async function createAdminPortfolio(data, adminUser, ipAddress) {
+  const {
+    name,
+    title,
+    categoryId,
+    category_id,
+    imageUrl,
+    image_url,
+    altText,
+    alt_text,
+    isActive = true,
+    is_active = true,
+    designNumber,
+    design_number,
+  } = data || {};
+
+  const cleanName = (name || title || "").trim();
+  const catId = (categoryId || category_id || "").trim();
+  const imgUrl = (imageUrl || image_url || "").trim();
+  const alt = (altText || alt_text || cleanName).trim();
+  const active = isActive !== undefined ? Boolean(isActive) : Boolean(is_active);
+
+  if (!cleanName || cleanName.length < 2) {
+    const err = new Error("Artwork name/title is required.");
+    err.code = "INVALID_PORTFOLIO_NAME";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (!catId) {
+    const err = new Error("Artwork category is required.");
+    err.code = "INVALID_PORTFOLIO_CATEGORY";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (!imgUrl) {
+    const err = new Error("Artwork image URL is required.");
+    err.code = "INVALID_PORTFOLIO_IMAGE";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // Next design number
+  let dNum = designNumber || design_number;
+  if (!dNum || isNaN(parseInt(dNum, 10))) {
+    const maxRes = await query(`SELECT COALESCE(MAX(design_number), 0) + 1 AS next_num FROM portfolio_designs;`);
+    dNum = maxRes.rows[0].next_num;
+  } else {
+    dNum = parseInt(dNum, 10);
+  }
+
+  const insertRes = await query(
+    `INSERT INTO portfolio_designs (design_number, name, category_id, image_url, alt_text, is_active)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING *;`,
+    [dNum, cleanName, catId, imgUrl, alt, active]
+  );
+  const created = insertRes.rows[0];
+
+  // Audit log
+  const actorRole = (adminUser.roles && adminUser.roles[0]) || "operator";
+  const actorId = isValidUuid(adminUser.id) ? adminUser.id : null;
+  await query(
+    `INSERT INTO audit_logs (actor_id, actor_role, action, target_entity, target_id, diff, ip_address)
+     VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+    [
+      actorId,
+      actorRole,
+      "portfolio:create",
+      "portfolio_designs",
+      created.id,
+      JSON.stringify({
+        design_number: dNum,
+        name: cleanName,
+        category_id: catId,
+      }),
+      formatInetIp(ipAddress),
+    ]
+  );
+
+  return created;
+}
+
+/**
+ * Updates an existing portfolio design.
+ *
+ * @param {string} designId
+ * @param {object} data
+ * @param {object} adminUser
+ * @param {string} [ipAddress]
+ * @returns {Promise<object>}
+ */
+async function updateAdminPortfolio(designId, data, adminUser, ipAddress) {
+  if (!isValidUuid(designId)) {
+    const err = new Error("Invalid portfolio design ID format.");
+    err.code = "INVALID_DESIGN_ID";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const existingRes = await query(`SELECT * FROM portfolio_designs WHERE id = $1;`, [designId]);
+  if (existingRes.rows.length === 0) {
+    const err = new Error(`Portfolio artwork with ID '${designId}' not found.`);
+    err.code = "PORTFOLIO_NOT_FOUND";
+    err.statusCode = 404;
+    throw err;
+  }
+  const existing = existingRes.rows[0];
+
+  const {
+    name,
+    title,
+    categoryId,
+    category_id,
+    imageUrl,
+    image_url,
+    altText,
+    alt_text,
+    isActive,
+    is_active,
+    designNumber,
+    design_number,
+  } = data || {};
+
+  const cleanName = (name !== undefined || title !== undefined) ? (name || title || "").trim() : existing.name;
+  const catId = (categoryId || category_id !== undefined) ? (categoryId || category_id || "").trim() : existing.category_id;
+  const imgUrl = (imageUrl || image_url !== undefined) ? (imageUrl || image_url || "").trim() : existing.image_url;
+  const alt = (altText || alt_text !== undefined) ? (altText || alt_text || cleanName).trim() : existing.alt_text;
+  const active = isActive !== undefined ? Boolean(isActive) : (is_active !== undefined ? Boolean(is_active) : existing.is_active);
+  const dNum = (designNumber || design_number !== undefined) ? parseInt(designNumber || design_number, 10) : existing.design_number;
+
+  const updateRes = await query(
+    `UPDATE portfolio_designs
+     SET name = $1,
+         category_id = $2,
+         image_url = $3,
+         alt_text = $4,
+         is_active = $5,
+         design_number = $6
+     WHERE id = $7
+     RETURNING *;`,
+    [cleanName, catId, imgUrl, alt, active, dNum, designId]
+  );
+  const updated = updateRes.rows[0];
+
+  // Audit log
+  const actorRole = (adminUser.roles && adminUser.roles[0]) || "operator";
+  const actorId = isValidUuid(adminUser.id) ? adminUser.id : null;
+  await query(
+    `INSERT INTO audit_logs (actor_id, actor_role, action, target_entity, target_id, diff, ip_address)
+     VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+    [
+      actorId,
+      actorRole,
+      "portfolio:update",
+      "portfolio_designs",
+      designId,
+      JSON.stringify({
+        previous: { name: existing.name, category_id: existing.category_id, is_active: existing.is_active },
+        new: { name: cleanName, category_id: catId, is_active: active },
+      }),
+      formatInetIp(ipAddress),
+    ]
+  );
+
+  return updated;
+}
+
+/**
+ * Toggles a portfolio design's public active status.
+ *
+ * @param {string} designId
+ * @param {boolean} isActive
+ * @param {object} adminUser
+ * @param {string} [ipAddress]
+ * @returns {Promise<object>}
+ */
+async function togglePortfolioAvailability(designId, isActive, adminUser, ipAddress) {
+  if (!isValidUuid(designId)) {
+    const err = new Error("Invalid portfolio design ID format.");
+    err.code = "INVALID_DESIGN_ID";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const existingRes = await query(`SELECT * FROM portfolio_designs WHERE id = $1;`, [designId]);
+  if (existingRes.rows.length === 0) {
+    const err = new Error(`Portfolio artwork with ID '${designId}' not found.`);
+    err.code = "PORTFOLIO_NOT_FOUND";
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const updateRes = await query(
+    `UPDATE portfolio_designs
+     SET is_active = $1
+     WHERE id = $2
+     RETURNING *;`,
+    [Boolean(isActive), designId]
+  );
+  const updated = updateRes.rows[0];
+
+  // Audit log
+  const actorRole = (adminUser.roles && adminUser.roles[0]) || "operator";
+  const actorId = isValidUuid(adminUser.id) ? adminUser.id : null;
+  await query(
+    `INSERT INTO audit_logs (actor_id, actor_role, action, target_entity, target_id, diff, ip_address)
+     VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+    [
+      actorId,
+      actorRole,
+      "portfolio:toggle_availability",
+      "portfolio_designs",
+      designId,
+      JSON.stringify({ is_active: Boolean(isActive) }),
+      formatInetIp(ipAddress),
+    ]
+  );
+
+  return updated;
+}
+
+/**
+ * Deletes a portfolio design.
+ *
+ * @param {string} designId
+ * @param {object} adminUser
+ * @param {string} [ipAddress]
+ * @returns {Promise<object>}
+ */
+async function deleteAdminPortfolio(designId, adminUser, ipAddress) {
+  if (!isValidUuid(designId)) {
+    const err = new Error("Invalid portfolio design ID format.");
+    err.code = "INVALID_DESIGN_ID";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const existingRes = await query(`SELECT * FROM portfolio_designs WHERE id = $1;`, [designId]);
+  if (existingRes.rows.length === 0) {
+    const err = new Error(`Portfolio artwork with ID '${designId}' not found.`);
+    err.code = "PORTFOLIO_NOT_FOUND";
+    err.statusCode = 404;
+    throw err;
+  }
+  const existing = existingRes.rows[0];
+
+  await query(`DELETE FROM portfolio_designs WHERE id = $1;`, [designId]);
+
+  // Audit log
+  const actorRole = (adminUser.roles && adminUser.roles[0]) || "operator";
+  const actorId = isValidUuid(adminUser.id) ? adminUser.id : null;
+  await query(
+    `INSERT INTO audit_logs (actor_id, actor_role, action, target_entity, target_id, diff, ip_address)
+     VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+    [
+      actorId,
+      actorRole,
+      "portfolio:delete",
+      "portfolio_designs",
+      designId,
+      JSON.stringify({ name: existing.name, design_number: existing.design_number }),
+      formatInetIp(ipAddress),
+    ]
+  );
+
+  return { success: true, deletedDesignId: designId };
+}
+
 module.exports = {
   formatInetIp,
   isValidUuid,
@@ -1006,6 +1843,16 @@ module.exports = {
   getCustomerDetails,
   listAdminProducts,
   toggleProductAvailability,
+  createAdminProduct,
+  updateAdminProduct,
+  archiveAdminProduct,
+  addProductImage,
+  deleteProductImage,
+  listAdminPortfolio,
+  createAdminPortfolio,
+  updateAdminPortfolio,
+  togglePortfolioAvailability,
+  deleteAdminPortfolio,
   listAdminServices,
   toggleServiceAvailability,
   listStaffAccounts,

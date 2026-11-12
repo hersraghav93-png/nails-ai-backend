@@ -12,10 +12,13 @@ const chatRouter = require("./src/routes/chatRoute");
 const authRouter = require("./src/routes/authRoute");
 const customerRouter = require("./src/routes/customerRoute");
 const adminRouter = require("./src/routes/adminRoute");
+const path = require("path");
 const cartRouter = require("./src/routes/cartRoute");
 const orderRouter = require("./src/routes/orderRoute");
 const bookingRouter = require("./src/routes/bookingRoute");
 const productRouter = require("./src/routes/productRoute");
+const portfolioRouter = require("./src/routes/portfolioRoute");
+const reviewRouter = require("./src/routes/reviewRoute");
 const webhookRouter = require("./src/routes/webhookRoute");
 
 const { closePool } = require("./src/db/pool");
@@ -28,12 +31,15 @@ const app = express();
 app.use(getCorsMiddleware());
 app.use(
   express.json({
-    limit: "2mb",
+    limit: "10mb",
     verify: (req, res, buf) => {
       req.rawBody = buf;
     },
   })
 );
+
+// Serve persistent uploads
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // 2. Initialize AI Service & In-Memory Knowledge Base
 initAiService();
@@ -47,6 +53,8 @@ app.use("/api/admin", adminRateLimiter, adminRouter);
 app.use("/api/cart", cartRouter);
 app.use("/api/orders", orderRouter);
 app.use("/api/products", productRouter);
+app.use("/api/portfolio", portfolioRouter);
+app.use("/api/reviews", reviewRouter);
 app.use("/api/webhooks", webhookRouter);
 app.use("/api", bookingRouter);
 
