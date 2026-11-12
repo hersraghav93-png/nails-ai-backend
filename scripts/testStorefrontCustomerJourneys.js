@@ -213,6 +213,7 @@ async function runTests() {
     assert(custom3d && custom3d.isCustomQuote === true, "3D & Custom Artistry isCustomQuote is true");
 
     // Submit appointment request with add-on
+    const addonId = (gelExt.addons && gelExt.addons[0] && gelExt.addons[0].id) || null;
     const bookingRes = await createAppointmentRequest({
       userId: null,
       customer: {
@@ -221,7 +222,7 @@ async function runTests() {
         email: "meera@example.com",
       },
       serviceId: "gel_extensions",
-      addonIds: ["542e1dc4-f980-46bf-a160-c69b5788a453"], // French tip detailing
+      addonIds: addonId ? [addonId] : [], // French tip detailing dynamically resolved
       serviceAddress: {
         address_line1: "Villa 12, Nirvana Country, Sector 50",
         city: "Gurgaon",
