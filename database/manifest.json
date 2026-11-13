@@ -1,0 +1,178 @@
+{
+  "project": "Nails by Divya",
+  "phase": "Phase 5.1B - Nails by Divya Admin Dashboard & Content Management",
+  "version": "1.5.0",
+  "target_engine": "PostgreSQL 15+",
+  "status": "FINAL_VERIFIED_FOUNDATION",
+  "created_at": "2026-11-12T16:30:00Z",
+  "git_branch": "feature/phase-4a-staging-integration",
+  "migrations": [
+    {
+      "id": "001",
+      "name": "001_initial_schema",
+      "up_file": "migrations/001_initial_schema.sql",
+      "down_file": "migrations/001_initial_schema_rollback.sql",
+      "sha256": "D8ACF3126BF51E1887B370ADF5C8C0CEB983E797073F4CFEDDFCA05387D7FEFE",
+      "down_sha256": "5CFD1C4676D0FB35074E31F5BB5C2B7DA33A945CB69333D1A02D6DCAFF269A6C",
+      "table_count": 50,
+      "description": "Core schema: users, roles, auth, profiles, catalog, services, portfolio, bookings, orders, order items, order claim attempts, payments, refunds, action tokens, discount rules, loyalty, consents, faqs, notifications, audit logs, settings"
+    },
+    {
+      "id": "002",
+      "name": "002_add_firebase_uid",
+      "up_file": "migrations/002_add_firebase_uid.sql",
+      "down_file": "migrations/002_add_firebase_uid_rollback.sql",
+      "sha256": "B42267A066784EF0AAAF5DE5FCF01332A2126376695EE5FD42D0CB7EE0961E76",
+      "down_sha256": "D57863FAB2E19D1483AE655E58B6F61086A9AF56536020FF11ACE3E611CC90C7",
+      "table_count": 50,
+      "description": "Add firebase_uid column and index to users table for Firebase Phone Authentication"
+    },
+    {
+      "id": "003",
+      "name": "003_reconcile_service_catalog_pricing",
+      "up_file": "migrations/003_reconcile_service_catalog_pricing.sql",
+      "down_file": "migrations/003_reconcile_service_catalog_pricing_rollback.sql",
+      "sha256": "70F4C7105770511958B452C10B8A9450A57E294694EB82404E9F6B88BC5F4795",
+      "down_sha256": "2803E50E29F62FF896343076E5B7BA4B6002B875CB4489885C8BFADE5DDD0F8C",
+      "table_count": 50,
+      "description": "Reconcile salon service catalog base prices and descriptions with approved canonical offerings (gel_extensions, natural_overlay, power_polish)"
+    },
+    {
+      "id": "004",
+      "name": "004_add_payment_status_type_to_history",
+      "up_file": "migrations/004_add_payment_status_type_to_history.sql",
+      "down_file": "migrations/004_add_payment_status_type_to_history_rollback.sql",
+      "sha256": "5F69D6E5BBEF8C64AC6633369EA74B0BB394FC1F36205CBE5B100DB990413969",
+      "down_sha256": "A83878143C3A46EDDC67667E48B76D8D889F4E0895AC475F440CCAD84A0B3624",
+      "table_count": 50,
+      "description": "Expand order_status_history chk_status_type to accept 'payment' transitions and seed orders:verify_payment permission for super_operator and artist_divya"
+    },
+    {
+      "id": "005",
+      "name": "005_add_customer_reviews",
+      "up_file": "migrations/005_add_customer_reviews.sql",
+      "down_file": "migrations/005_add_customer_reviews_rollback.sql",
+      "sha256": "6CBDF2094D0E9EFB0E0D7E36B3FD85CB1A2624E81DE87A8FAA10F2A7CF44A9C0",
+      "down_sha256": "7E98711E67A3742CA4D74E59728C3F6BEB2ACF6F57EFA63DC1579D5DB697E5E3",
+      "table_count": 51,
+      "description": "Customer reviews table with unapproved default status, timestamp triggers, and reviews:moderate permission for super_operator and artist_divya"
+    },
+    {
+      "id": "006",
+      "name": "006_analytics_daily_events",
+      "up_file": "migrations/006_analytics_daily_events.sql",
+      "down_file": "migrations/006_analytics_daily_events_rollback.sql",
+      "sha256": "905C3EF572FBE2AB1E88ED45C7E7220281E9C2DDA033B8A0F7B9D2D5A3258FD9",
+      "down_sha256": "B8C143331B735BB499FDFB09DAA5CF40E20F7CF51EEFDB026F06264CE3BEBCA0",
+      "table_count": 52,
+      "status": "AUTHORED_PENDING_APPROVAL",
+      "description": "Daily privacy-safe analytics aggregation table for 6 core events with date/name primary key; authored and reviewed; awaiting explicit user approval before database execution"
+    }
+  ],
+  "seeds": [
+    {
+      "id": "001",
+      "name": "001_roles_and_categories",
+      "file": "seeds/001_roles_and_categories.sql",
+      "sha256": "C84740207AF55CB0132F486C03A663E551D80F1D737DDBE54D9DF967E1C1F611",
+      "description": "Default RBAC roles (4), fine-grained permissions (15), role mappings, product categories (4), portfolio categories (4), canonical salon services (5 with approved base/promo pricing & descriptions), add-ons (3 unset prices), Delhi NCR manual review fallback (unverified PIN codes removed)"
+    },
+    {
+      "id": "002",
+      "name": "002_catalog_products",
+      "file": "seeds/002_catalog_products.sql",
+      "sha256": "DB826AB68226E6C9B5CBC7C5440114C5EECED474C4D8E3571EF36A6B0C30D04B",
+      "description": "22 verified press-on nail sets with prices (₹699 - ₹1399), SKUs, descriptions, and media assets (idempotent ON CONFLICT)"
+    },
+    {
+      "id": "003",
+      "name": "003_portfolio_lookbook",
+      "file": "seeds/003_portfolio_lookbook.sql",
+      "sha256": "5CE75B62A82FA9F448DA089D478FBE9C0D262DA343C0A2EEE5A826F81CFE302D",
+      "description": "60 portfolio designs (1 to 60); Design #32 quarantined pending artist confirmation of missing nvm9.png"
+    },
+    {
+      "id": "004",
+      "name": "004_faqs",
+      "file": "seeds/004_faqs.sql",
+      "sha256": "BC8A0401FE5EBD8A8CF44DA1F7D2763BF6A93AFB6EAF9B4F430681CD47ADC90F",
+      "description": "31 verified customer FAQs (19 from index.html #trust + 12 across 3 SEO landing pages)"
+    },
+    {
+      "id": "005",
+      "name": "005_business_settings",
+      "file": "seeds/005_business_settings.sql",
+      "sha256": "8FF4296D2914B00315B1D3BC493EC615E3AC3C89D0816F5C1B79B043A5D71BE5",
+      "description": "Default operational settings: loyalty disabled, cryptographic claim secret hashing, freelance service area policy, token TTLs, DPDP retention"
+    }
+  ],
+  "execution_order": [
+    "migrations/001_initial_schema.sql",
+    "seeds/001_roles_and_categories.sql",
+    "seeds/002_catalog_products.sql",
+    "seeds/003_portfolio_lookbook.sql",
+    "seeds/004_faqs.sql",
+    "seeds/005_business_settings.sql",
+    "migrations/002_add_firebase_uid.sql",
+    "migrations/003_reconcile_service_catalog_pricing.sql",
+    "migrations/004_add_payment_status_type_to_history.sql"
+  ],
+  "rollback_order": [
+    "migrations/004_add_payment_status_type_to_history_rollback.sql",
+    "migrations/003_reconcile_service_catalog_pricing_rollback.sql",
+    "migrations/002_add_firebase_uid_rollback.sql",
+    "migrations/001_initial_schema_rollback.sql"
+  ],
+  "tables": [
+    {"name": "users", "domain": "Identity, Access & Profiles"},
+    {"name": "roles", "domain": "Identity, Access & Profiles"},
+    {"name": "permissions", "domain": "Identity, Access & Profiles"},
+    {"name": "role_permissions", "domain": "Identity, Access & Profiles"},
+    {"name": "user_roles", "domain": "Identity, Access & Profiles"},
+    {"name": "customer_profiles", "domain": "Identity, Access & Profiles"},
+    {"name": "admin_profiles", "domain": "Identity, Access & Profiles"},
+    {"name": "user_addresses", "domain": "Identity, Access & Profiles"},
+    {"name": "customer_consents", "domain": "Identity, Access & Profiles"},
+    {"name": "product_categories", "domain": "Catalog & Portfolio"},
+    {"name": "products", "domain": "Catalog & Portfolio"},
+    {"name": "product_images", "domain": "Catalog & Portfolio"},
+    {"name": "product_variants", "domain": "Catalog & Portfolio"},
+    {"name": "portfolio_categories", "domain": "Catalog & Portfolio"},
+    {"name": "portfolio_designs", "domain": "Catalog & Portfolio"},
+    {"name": "services", "domain": "At-Home Services"},
+    {"name": "service_addons", "domain": "At-Home Services"},
+    {"name": "service_areas", "domain": "At-Home Services"},
+    {"name": "faqs", "domain": "Knowledge Base & FAQs"},
+    {"name": "wishlists", "domain": "Customer Experience & Cart"},
+    {"name": "wishlist_items", "domain": "Customer Experience & Cart"},
+    {"name": "carts", "domain": "Customer Experience & Cart"},
+    {"name": "cart_items", "domain": "Customer Experience & Cart"},
+    {"name": "discount_codes", "domain": "Discounts & Promotions"},
+    {"name": "discount_code_products", "domain": "Discounts & Promotions"},
+    {"name": "discount_code_categories", "domain": "Discounts & Promotions"},
+    {"name": "discount_code_services", "domain": "Discounts & Promotions"},
+    {"name": "orders", "domain": "Ecommerce Orders & Shipping"},
+    {"name": "order_items", "domain": "Ecommerce Orders & Shipping"},
+    {"name": "order_status_history", "domain": "Ecommerce Orders & Shipping"},
+    {"name": "discount_redemptions", "domain": "Discounts & Promotions"},
+    {"name": "shipments", "domain": "Ecommerce Orders & Shipping"},
+    {"name": "order_claim_attempts", "domain": "Ecommerce Orders & Identity Security"},
+    {"name": "bookings", "domain": "At-Home Bookings"},
+    {"name": "booking_status_history", "domain": "At-Home Bookings"},
+    {"name": "booking_action_tokens", "domain": "At-Home Bookings"},
+    {"name": "custom_design_requests", "domain": "Custom Design Requests"},
+    {"name": "custom_request_images", "domain": "Custom Design Requests"},
+    {"name": "custom_quotes", "domain": "Custom Design Requests"},
+    {"name": "custom_quote_items", "domain": "Custom Design Requests"},
+    {"name": "payments", "domain": "Financials, Payments & Refunds"},
+    {"name": "payment_events", "domain": "Financials, Payments & Refunds"},
+    {"name": "refunds", "domain": "Financials, Payments & Refunds"},
+    {"name": "refund_events", "domain": "Financials, Payments & Refunds"},
+    {"name": "loyalty_accounts", "domain": "Loyalty Program"},
+    {"name": "loyalty_transactions", "domain": "Loyalty Program"},
+    {"name": "notification_jobs", "domain": "Notifications & Operations"},
+    {"name": "notification_delivery_logs", "domain": "Notifications & Operations"},
+    {"name": "audit_logs", "domain": "Notifications & Operations"},
+    {"name": "business_settings", "domain": "Business Configuration"}
+  ]
+}

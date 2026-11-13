@@ -143,18 +143,19 @@ Important Terms Note: All 6 offers are confirmed active as displayed on the webs
           regularVsPromo = "Promotional starting rate is ₹599. Regular catalog press-on nail sets range from ₹699 to ₹1399.";
         } else if (cardTitle.includes("Buy 2")) {
           offerSlug = "buy-2-get-1-free";
-          offerType = "Press-On Nail Bundle (Buy 2 Get 1 Free)";
-          regularVsPromo = "When you order 2 press-on sets, your 3rd set is complimentary (FREE). Regular catalog sets range from ₹699 to ₹1399 each.";
+          offerType = "Multi-Set Inquiry Policy";
+          regularVsPromo = "Individual sets receive the flat ₹599 promotional price. Automated bundle discounts are not configured in checkout.";
+          conditions = "Manual Confirmation Required. Inquire on WhatsApp for custom bulk or bridal party sets.";
         } else if (cardTitle.includes("First Order")) {
           offerSlug = "first-order-10-off";
-          offerType = "New Customer Welcome Discount";
-          regularVsPromo = "10% discount off your first order. Regular prices apply before discount.";
-          conditions += " Applies to new customers placing their first Nails by Divya order.";
+          offerType = "Welcome Promotion Policy";
+          regularVsPromo = "All 22 press-on designs already receive the verified flat promotional rate of ₹599 (regular catalog prices ₹699–₹1,399). No automated welcome coupon is active in checkout.";
+          conditions = "Unverified / Consult Artist. Special welcome discounts must be discussed directly with Divya.";
         } else if (cardTitle.includes("Returning Clients")) {
           offerSlug = "returning-clients-15-off";
-          offerType = "Returning Client Loyalty Discount";
-          regularVsPromo = "15% discount off your order or appointment. Regular prices apply before discount.";
-          conditions += " Applies to returning clients coming back for their next set or appointment.";
+          offerType = "Returning Client Policy";
+          regularVsPromo = "The loyalty program is currently disabled in backend settings pending business approval. Returning client discounts are not automatically available.";
+          conditions = "Inactive / Pending business approval. Clients should consult Divya directly via WhatsApp for personalized bookings.";
         } else if (cardTitle.includes("Same-Day Delivery")) {
           offerSlug = "same-day-delivery-delhi-ncr";
           offerType = "Express Delivery Service";
@@ -259,7 +260,7 @@ Regular Catalog Price: ${regularPrice}
 Category: Handmade Press-On Nails
 Description: ${desc}
 Craftsmanship: Custom hand-crafted with salon-grade soft gel, tailored to your exact nail sizing.
-Active Festive Offers Context: Eligible for active Diwali promotions (e.g. Buy 2 Get 1 Free, First Order 10% off, Returning Clients 15% off). Regular catalog price is ${regularPrice}. Promotional discounts apply upon order confirmation on WhatsApp.
+Active Promotional Context: Available at the active promotional price of ₹599 (regular catalog price: ${regularPrice}). Custom sizing and shapes available.
 Customization: Length, shape (Almond, Coffin, Square, Oval, Stiletto), and design details can be tailored upon order.
 Pan-India Delivery: Shipped across India. Same-day delivery available in Delhi NCR.
 Internal SKU: ${sku} (NOTE: For internal lookup only. Never mention SKU "${sku}" to the customer unless they explicitly typed it first.)`;

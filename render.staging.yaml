@@ -1,0 +1,83 @@
+# Render Infrastructure-as-Code Blueprint
+# Nails by Divya — Staging Environment (100% Free Tier — ₹0 Budget)
+# Web Service: nails-ai-backend-staging (Render Free Compute: 0.1 CPU, 512MB RAM)
+# Database: External Isolated Neon Serverless PostgreSQL (Neon Free Tier: 1GB, permanent)
+# API Host: staging-api.nailsbydivya.store
+
+version: "1"
+
+services:
+  - type: web
+    name: nails-ai-backend-staging
+    runtime: node
+    plan: free
+    region: singapore
+    branch: feature/phase-4a-staging-integration
+    buildCommand: npm install
+    startCommand: npm run migrate && npm start
+    healthCheckPath: /health
+    autoDeploy: false
+    domains:
+      - staging-api.nailsbydivya.store
+    envVars:
+      # Application Environment
+      - key: NODE_ENV
+        value: staging
+      - key: PORT
+        value: "3000"
+      - key: LOG_LEVEL
+        value: info
+      - key: TRUST_PROXY
+        value: "true"
+
+      # PostgreSQL Staging Connection (External Neon Free Serverless PostgreSQL)
+      - key: DATABASE_URL
+        sync: false
+
+      # CORS Strict Allowlist for Staging (Strictly isolated: production and localhost origins prohibited)
+      - key: ALLOWED_ORIGINS
+        value: https://staging.nailsbydivya.store,https://staging-admin.nailsbydivya.store,https://preview.nailsbydivya.store
+      - key: CORS_ORIGIN
+        value: https://staging.nailsbydivya.store,https://staging-admin.nailsbydivya.store,https://preview.nailsbydivya.store
+      - key: CORS_CREDENTIALS
+        value: "true"
+
+      # Rate Limiting
+      - key: RATE_LIMIT_WINDOW_MS
+        value: "900000"
+      - key: RATE_LIMIT_MAX
+        value: "200"
+      - key: ADMIN_RATE_LIMIT_MAX
+        value: "100"
+      - key: BROWSE_RATE_LIMIT_MAX
+        value: "300"
+
+      # Meta WhatsApp Cloud API (v26.0 - Disabled until credentials configured)
+      - key: WHATSAPP_GRAPH_API_VERSION
+        value: v26.0
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_BUSINESS_ACCOUNT_ID
+        sync: false
+      - key: WHATSAPP_WEBHOOK_VERIFY_TOKEN
+        sync: false
+      - key: WHATSAPP_APP_SECRET
+        sync: false
+      - key: WHATSAPP_APPROVED_RECIPIENTS
+        sync: false
+
+      # Firebase Admin Staging Credentials (Disabled until credentials configured)
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+
+      # Administrative Operations & Auth
+      - key: ADMIN_PHONE_ALLOWLIST
+        sync: false
+      - key: ADMIN_INVITE_SECRET
+        sync: false

@@ -1,3 +1,10 @@
 node_modules
 .env
+.env.staging
+.env.local
 knowledge/backups/
+database/backups/*
+!database/backups/.gitkeep
+uploads/*
+!uploads/.gitkeep
+.neon

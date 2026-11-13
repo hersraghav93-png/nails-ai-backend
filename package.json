@@ -7,7 +7,26 @@
     "start": "node index.js",
     "dev": "node --watch index.js",
     "build-knowledge": "node scripts/buildKnowledge.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "migrate": "node scripts/migrate.js --up",
+    "migrate:status": "node scripts/migrate.js --status",
+    "seed": "node scripts/seedDatabase.js",
+    "verify:staging": "node scripts/verifyStagingIntegration.js",
+    "provision:admin": "node scripts/provisionAdmin.js",
+    "backup:staging": "node scripts/backupRecoveryStaging.js",
+    "test:unit": "node scripts/testBackend.js",
+    "test:auth": "node scripts/testAuth.js",
+    "test:commerce": "node scripts/testCommerce.js",
+    "test:bookings": "node scripts/testBookings.js",
+    "test:admin": "node scripts/testAdminOps.js",
+    "test:auth-integration": "node scripts/testAuthIntegration.js",
+    "test:security": "node scripts/testSecurityProductionReadiness.js",
+    "test:communications": "node scripts/testCommunications.js",
+    "test:storefront": "node scripts/testStorefrontCustomerJourneys.js",
+    "test:divv": "node scripts/testDivvQuality.js",
+    "test:payment": "node scripts/testPaymentVerification.js",
+    "test:staging": "node scripts/testStagingIntegration.js",
+    "test:admin-cms": "node scripts/testAdminDashboardCMS.js",
+    "test": "node scripts/testBackend.js && node scripts/testAuth.js && node scripts/testCommerce.js && node scripts/testBookings.js && node scripts/testAdminOps.js && node scripts/testAuthIntegration.js && node scripts/testSecurityProductionReadiness.js && node scripts/testCommunications.js && node scripts/testStorefrontCustomerJourneys.js && node scripts/testDivvQuality.js && node scripts/testPaymentVerification.js && node scripts/testStagingIntegration.js && node scripts/testAdminDashboardCMS.js"
   },
   "keywords": [
     "ai",
@@ -22,9 +41,13 @@
   "dependencies": {
     "@google/genai": "^2.11.0",
     "@google/generative-ai": "^0.24.1",
+    "@neon/config": "^1.14.0",
+    "@neon/env": "^2.1.3",
     "cheerio": "^1.0.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "firebase-admin": "^14.5.0",
+    "pg": "^8.23.1"
   }
 }
