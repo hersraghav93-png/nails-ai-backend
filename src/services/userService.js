@@ -151,6 +151,48 @@ async function findOrCreateUserByFirebaseToken(decodedToken) {
     }
   }
 
+  // 2b. If not found by firebase_uid or phone, check if user exists by verified email address
+  if (!user && cleanEmail) {
+    const emailRes = await query(
+      `SELECT id, firebase_uid, phone, phone_verified_at, email, email_verified_at, is_active, created_at, updated_at
+       FROM users
+       WHERE LOWER(email) = LOWER($1);`,
+      [cleanEmail]
+    );
+
+    if (emailRes.rows.length > 0) {
+      const existingUser = emailRes.rows[0];
+
+      // Security check: If the existing account is already bound to a different Firebase UID, reject!
+      if (existingUser.firebase_uid && existingUser.firebase_uid !== cleanUid) {
+        const conflictErr = new Error(
+          "Account conflict: This email address is already registered to a different Firebase identity. Account linking rejected."
+        );
+        conflictErr.code = "ACCOUNT_LINK_CONFLICT";
+        conflictErr.statusCode = 409;
+        throw conflictErr;
+      }
+
+      // Safe linking: Only link if firebase_uid IS NULL or matches
+      const updateRes = await query(
+        `UPDATE users
+         SET firebase_uid = $1,
+             email_verified_at = COALESCE(email_verified_at, CURRENT_TIMESTAMP),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2 AND (firebase_uid IS NULL OR firebase_uid = $1)
+         RETURNING id, firebase_uid, phone, phone_verified_at, email, email_verified_at, is_active, created_at, updated_at;`,
+        [cleanUid, existingUser.id]
+      );
+
+      if (updateRes.rows.length > 0) {
+        user = updateRes.rows[0];
+      } else {
+        const refetch = await query(`SELECT * FROM users WHERE id = $1;`, [existingUser.id]);
+        user = refetch.rows[0];
+      }
+    }
+  }
+
   // 3. If user still does not exist, create new user and customer profile (concurrency-safe)
   if (!user) {
     try {
