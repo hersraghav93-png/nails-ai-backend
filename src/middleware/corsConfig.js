@@ -24,6 +24,26 @@ const ALLOWED_STAGING_ORIGINS = [
   "https://staging-admin.nailsbydivya.store",
 ];
 
+/**
+ * Returns true when the origin is a Cloudflare Pages preview URL.
+ * Pattern: https://<slug>.pages.dev
+ * The slug must not itself contain dots (to reject spoofed origins like
+ * https://evil.com.pages.dev, which is not a real Cloudflare Pages hostname).
+ * Real Cloudflare Pages hostnames are exactly 3 labels: <slug>.pages.dev
+ */
+function isCloudflarePagesDev(origin) {
+  if (!origin) return false;
+  try {
+    const url = new URL(origin);
+    if (url.protocol !== "https:") return false;
+    const parts = url.hostname.split(".");
+    // Must be exactly 3 labels: <slug>.pages.dev
+    return parts.length === 3 && parts[1] === "pages" && parts[2] === "dev";
+  } catch {
+    return false;
+  }
+}
+
 // Authorized local development origins
 const ALLOWED_DEV_ORIGINS = [
   "http://localhost:3000",
@@ -60,7 +80,7 @@ function isOriginAllowed(origin, env) {
       );
       if (sanitizedStaging.includes(origin)) return true;
     }
-    return ALLOWED_STAGING_ORIGINS.includes(origin);
+    return ALLOWED_STAGING_ORIGINS.includes(origin) || isCloudflarePagesDev(origin);
   }
 
   if (
