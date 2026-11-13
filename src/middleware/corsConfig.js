@@ -25,20 +25,16 @@ const ALLOWED_STAGING_ORIGINS = [
 ];
 
 /**
- * Returns true when the origin is a Cloudflare Pages preview URL.
- * Pattern: https://<slug>.pages.dev
- * The slug must not itself contain dots (to reject spoofed origins like
- * https://evil.com.pages.dev, which is not a real Cloudflare Pages hostname).
- * Real Cloudflare Pages hostnames are exactly 3 labels: <slug>.pages.dev
+ * Returns true when the origin is a Cloudflare Pages deployment URL.
+ * Pattern: https://<slug>.pages.dev or https://<branch|commit>.<project>.pages.dev
+ * All official Cloudflare Pages previews are subdomains of pages.dev served over HTTPS.
  */
 function isCloudflarePagesDev(origin) {
   if (!origin) return false;
   try {
     const url = new URL(origin);
     if (url.protocol !== "https:") return false;
-    const parts = url.hostname.split(".");
-    // Must be exactly 3 labels: <slug>.pages.dev
-    return parts.length === 3 && parts[1] === "pages" && parts[2] === "dev";
+    return url.hostname === "pages.dev" || url.hostname.endsWith(".pages.dev");
   } catch {
     return false;
   }
