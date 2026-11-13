@@ -1,0 +1,81 @@
+# Render Infrastructure-as-Code Blueprint
+# Nails by Divya — Production Environment (100% Free Tier — ₹0 Budget)
+# Web Service: nails-ai-backend (Render Free Compute: 0.1 CPU, 512MB RAM)
+# Database: External Isolated Neon Serverless PostgreSQL (Neon Production Branch)
+# API Host: nails-ai-backend.onrender.com
+
+version: "1"
+
+services:
+  - type: web
+    name: nails-ai-backend
+    runtime: node
+    plan: free
+    region: singapore
+    branch: main
+    buildCommand: npm install
+    startCommand: npm run migrate && npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # Application Environment
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+      - key: LOG_LEVEL
+        value: info
+      - key: TRUST_PROXY
+        value: "true"
+
+      # PostgreSQL Production Connection (External Neon Free Serverless PostgreSQL)
+      - key: DATABASE_URL
+        sync: false
+
+      # CORS Strict Allowlist for Production
+      - key: ALLOWED_ORIGINS
+        value: https://nailsbydivya.store,https://www.nailsbydivya.store
+      - key: CORS_ORIGIN
+        value: https://nailsbydivya.store,https://www.nailsbydivya.store
+      - key: CORS_CREDENTIALS
+        value: "true"
+
+      # Rate Limiting
+      - key: RATE_LIMIT_WINDOW_MS
+        value: "900000"
+      - key: RATE_LIMIT_MAX
+        value: "200"
+      - key: ADMIN_RATE_LIMIT_MAX
+        value: "100"
+      - key: BROWSE_RATE_LIMIT_MAX
+        value: "300"
+
+      # Meta WhatsApp Cloud API (v26.0)
+      - key: WHATSAPP_GRAPH_API_VERSION
+        value: v26.0
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_BUSINESS_ACCOUNT_ID
+        sync: false
+      - key: WHATSAPP_WEBHOOK_VERIFY_TOKEN
+        sync: false
+      - key: WHATSAPP_APP_SECRET
+        sync: false
+      - key: WHATSAPP_APPROVED_RECIPIENTS
+        sync: false
+
+      # Firebase Admin Production Credentials
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+
+      # Administrative Operations & Auth
+      - key: ADMIN_PHONE_ALLOWLIST
+        sync: false
+      - key: ADMIN_INVITE_SECRET
+        sync: false

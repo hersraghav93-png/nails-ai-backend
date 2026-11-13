@@ -4,6 +4,7 @@
   "description": "Production-Ready Grounded AI Knowledge System & Backend for Nails by Divya",
   "main": "index.js",
   "scripts": {
+    "build": "echo 'Build complete'",
     "start": "node index.js",
     "dev": "node --watch index.js",
     "build-knowledge": "node scripts/buildKnowledge.js",
