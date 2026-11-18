@@ -3,6 +3,7 @@ const CONFIG = require("../config");
 const { generateChatReply, reloadKnowledge, getKnowledgeStatus } = require("../services/aiService");
 const { buildKnowledgeDatabase } = require("../builder/knowledgeBuilder");
 const { checkHealth } = require("../db/pool");
+const { isFirebaseAdminConfigured } = require("../services/firebaseService");
 
 /**
  * ==========================================================================
@@ -44,6 +45,10 @@ async function handleHealthCheck(req, res) {
     ai: {
       status: knowledgeStats.hasGeminiKey ? "configured" : "missing_api_key",
       model: knowledgeStats.model,
+    },
+    auth: {
+      status: isFirebaseAdminConfigured() ? "configured" : "unconfigured",
+      projectId: CONFIG.firebase.projectId || null,
     },
   };
 

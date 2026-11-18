@@ -40,6 +40,14 @@ function initFirebase() {
       return firebaseApp;
     }
 
+    if (fbConfig.serviceAccountJson && fbConfig.serviceAccountJson.project_id && fbConfig.serviceAccountJson.client_email && fbConfig.serviceAccountJson.private_key) {
+      firebaseApp = initializeApp({
+        credential: cert(fbConfig.serviceAccountJson),
+      });
+      console.log(`🔥 [Firebase Admin] Initialized with FIREBASE_SERVICE_ACCOUNT_JSON for project: "${fbConfig.serviceAccountJson.project_id}"`);
+      return firebaseApp;
+    }
+
     if (fbConfig.serviceAccountPath) {
       const resolvedPath = path.resolve(process.cwd(), fbConfig.serviceAccountPath);
       if (fs.existsSync(resolvedPath)) {
@@ -294,11 +302,23 @@ async function verifyFirebaseAdminUser(uid, expectedPhone) {
   }
 }
 
+/**
+ * Returns true if Firebase Admin SDK is initialized and ready to verify ID tokens.
+ * @returns {boolean}
+ */
+function isFirebaseAdminConfigured() {
+  if (!firebaseApp) {
+    initFirebase();
+  }
+  return Boolean(firebaseApp);
+}
+
 // Auto-initialize on module load if configured
 initFirebase();
 
 module.exports = {
   initFirebase,
+  isFirebaseAdminConfigured,
   verifyIdToken,
   verifyFirebaseAdminUser,
   setTestTokenVerifier,

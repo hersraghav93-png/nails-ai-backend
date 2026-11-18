@@ -88,23 +88,53 @@ const CONFIG = {
     isConfigured: Boolean(process.env.DATABASE_URL || process.env.PGPASSWORD || process.env.PGUSER),
   },
   // Firebase Authentication (Phase 1C)
-  firebase: {
-    projectId: process.env.FIREBASE_PROJECT_ID || "",
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL || "",
-    privateKey: (() => {
-      let key = process.env.FIREBASE_PRIVATE_KEY || "";
-      if (key.startsWith('"') && key.endsWith('"')) {
+  firebase: (() => {
+    let parsedServiceAccount = null;
+    if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON && process.env.FIREBASE_SERVICE_ACCOUNT_JSON.trim()) {
+      try {
+        parsedServiceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON.trim());
+        if (parsedServiceAccount && typeof parsedServiceAccount.private_key === "string") {
+          parsedServiceAccount.private_key = parsedServiceAccount.private_key.replace(/\\n/g, "\n");
+        }
+      } catch (err) {
+        console.error("❌ [Config Error] Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON:", err.message);
+      }
+    }
+
+    const normalizePrivateKey = (raw) => {
+      let key = (raw || "").trim();
+      if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
         key = key.slice(1, -1);
       }
       return key.replace(/\\n/g, "\n");
-    })(),
-    serviceAccountPath: process.env.FIREBASE_SERVICE_ACCOUNT_PATH || "",
-    isConfigured: Boolean(
-      process.env.FIREBASE_PROJECT_ID &&
-        ((process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) ||
-          process.env.FIREBASE_SERVICE_ACCOUNT_PATH)
-    ),
-  },
+    };
+
+    const projectId =
+      (process.env.FIREBASE_PROJECT_ID || "").trim() ||
+      (parsedServiceAccount && parsedServiceAccount.project_id) ||
+      "";
+    const clientEmail =
+      (process.env.FIREBASE_CLIENT_EMAIL || "").trim() ||
+      (parsedServiceAccount && parsedServiceAccount.client_email) ||
+      "";
+    const privateKey =
+      normalizePrivateKey(process.env.FIREBASE_PRIVATE_KEY) ||
+      (parsedServiceAccount && parsedServiceAccount.private_key) ||
+      "";
+    const serviceAccountPath = (process.env.FIREBASE_SERVICE_ACCOUNT_PATH || "").trim();
+
+    return {
+      projectId,
+      clientEmail,
+      privateKey,
+      serviceAccountPath,
+      serviceAccountJson: parsedServiceAccount,
+      isConfigured: Boolean(
+        parsedServiceAccount ||
+          (projectId && ((clientEmail && privateKey) || serviceAccountPath))
+      ),
+    };
+  })(),
   // Customer Communications & WhatsApp Configuration (Phase 3A & 4A)
   notifications: {
     whatsapp: {
