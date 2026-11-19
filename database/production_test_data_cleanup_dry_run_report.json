@@ -1,13 +1,13 @@
 {
-  "generatedAt": "2026-11-19T11:32:13.421Z",
+  "generatedAt": "2026-11-19T11:49:01.957Z",
   "status": "DRY_RUN_PREPARED_AWAITING_APPROVAL",
   "database": "PostgreSQL / Neon snowy-field-03627992",
   "summary": {
-    "totalOrdersInDatabase": 297,
-    "testOrdersIdentifiedForArchive": 295,
+    "totalOrdersInDatabase": 354,
+    "testOrdersIdentifiedForArchive": 352,
     "developerSmokeOrdersPreserved": 2,
-    "totalBookingsInDatabase": 97,
-    "testBookingsIdentifiedForArchive": 96,
+    "totalBookingsInDatabase": 100,
+    "testBookingsIdentifiedForArchive": 99,
     "developerSmokeBookingsPreserved": 1
   },
   "developerSmokeTestRecordsPreserved": {
@@ -60,8 +60,8 @@
       ]
     },
     "testAdminOps.js (Admin Order Lifecycle Operations)": {
-      "count": 32,
-      "totalAmount": 31968,
+      "count": 38,
+      "totalAmount": 37962,
       "sampleOrderNumbers": [
         "NBD-ORD-OPS-1008",
         "NBD-ORD-OPS-CAN-1009",
@@ -69,8 +69,8 @@
       ]
     },
     "testPaymentVerification.js (Concurrency & Payment Verification)": {
-      "count": 173,
-      "totalAmount": 207254,
+      "count": 224,
+      "totalAmount": 268352,
       "sampleOrderNumbers": [
         "NBD-ORD-PAY-1054-AUTH-1",
         "NBD-ORD-PAY-1055-AUTH-2",
@@ -96,7 +96,7 @@
       ]
     },
     "testAdminOps.js (Admin Appointment Approvals & Alternate Slots)": {
-      "count": 16,
+      "count": 19,
       "sampleBookingNumbers": [
         "NBD-BKG-OPS-510",
         "NBD-BKG-OPS-517",
@@ -105,13 +105,13 @@
     }
   },
   "dependentRecordsCount": {
-    "order_items": 120,
-    "order_status_history": 518,
-    "payments_for_orders": 98,
+    "order_items": 123,
+    "order_status_history": 617,
+    "payments_for_orders": 125,
     "order_claim_attempts": 0,
     "discount_redemptions": 0,
-    "booking_status_history": 206,
-    "booking_action_tokens": 37,
+    "booking_status_history": 218,
+    "booking_action_tokens": 40,
     "payments_for_bookings": 0
   },
   "foreignKeyConstraints": [

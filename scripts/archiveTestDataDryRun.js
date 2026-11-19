@@ -58,7 +58,9 @@ async function runDryRun() {
   const smokeOrdersRes = await query(
     `SELECT id, order_number, customer_name, customer_phone, total_amount, order_status, payment_status, created_at
      FROM orders
-     WHERE customer_name ILIKE '%Raghavendra%' OR customer_phone = ANY($1)
+     WHERE customer_name ILIKE '%Raghavendra%'
+        OR customer_phone = ANY($1)
+        OR order_number IN ('NBD-ORD-1241', 'NBD-ORD-1298')
      ORDER BY created_at ASC;`,
     [PRESERVED_SMOKE_TEST_PHONES]
   );
@@ -67,7 +69,9 @@ async function runDryRun() {
   const smokeBookingsRes = await query(
     `SELECT id, booking_number, customer_name, customer_phone, service_id, requested_date, booking_status, created_at
      FROM bookings
-     WHERE customer_name ILIKE '%Raghavendra%' OR customer_phone = ANY($1)
+     WHERE customer_name ILIKE '%Raghavendra%'
+        OR customer_phone = ANY($1)
+        OR booking_number = 'NBD-BKG-599'
      ORDER BY created_at ASC;`,
     [PRESERVED_SMOKE_TEST_PHONES]
   );

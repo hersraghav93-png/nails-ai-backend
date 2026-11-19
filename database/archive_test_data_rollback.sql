@@ -29,6 +29,14 @@ INSERT INTO payments
 SELECT * FROM _archive_payments
 ON CONFLICT (id) DO NOTHING;
 
+INSERT INTO order_claim_attempts
+SELECT * FROM _archive_order_claim_attempts
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO discount_redemptions
+SELECT * FROM _archive_discount_redemptions
+ON CONFLICT (id) DO NOTHING;
+
 INSERT INTO booking_status_history
 SELECT * FROM _archive_booking_status_history
 ON CONFLICT (id) DO NOTHING;
@@ -37,13 +45,7 @@ INSERT INTO booking_action_tokens
 SELECT * FROM _archive_booking_action_tokens
 ON CONFLICT (id) DO NOTHING;
 
--- 3. Cleanup archive tables if rollback verified
--- DROP TABLE IF EXISTS _archive_booking_action_tokens;
--- DROP TABLE IF EXISTS _archive_booking_status_history;
--- DROP TABLE IF EXISTS _archive_payments;
--- DROP TABLE IF EXISTS _archive_order_status_history;
--- DROP TABLE IF EXISTS _archive_order_items;
--- DROP TABLE IF EXISTS _archive_orders;
--- DROP TABLE IF EXISTS _archive_bookings;
+-- 3. Clear Archive Tables (Only upon verified restoration)
+-- TRUNCATE TABLE _archive_payments, _archive_order_items, _archive_order_status_history, _archive_order_claim_attempts, _archive_discount_redemptions, _archive_booking_action_tokens, _archive_booking_status_history, _archive_orders, _archive_bookings;
 
 COMMIT;
