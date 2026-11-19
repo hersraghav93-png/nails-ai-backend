@@ -1,14 +1,30 @@
 {
-  "generatedAt": "2026-11-19T11:49:01.957Z",
-  "status": "DRY_RUN_PREPARED_AWAITING_APPROVAL",
+  "generatedAt": "2026-11-19T12:22:44.000Z",
+  "status": "ARCHIVE_EXECUTED_SUCCESSFULLY",
   "database": "PostgreSQL / Neon snowy-field-03627992",
+  "backupBranch": {
+    "branchId": "br-tiny-tree-b37pyldn",
+    "name": "backup-before-test-archive-20261119",
+    "parentBranchId": "br-lucky-boat-b32cw1oo",
+    "parentLsn": "0/2FE0130"
+  },
   "summary": {
-    "totalOrdersInDatabase": 354,
-    "testOrdersIdentifiedForArchive": 352,
-    "developerSmokeOrdersPreserved": 2,
-    "totalBookingsInDatabase": 100,
-    "testBookingsIdentifiedForArchive": 99,
-    "developerSmokeBookingsPreserved": 1
+    "totalOrdersArchived": 354,
+    "totalBookingsArchived": 100,
+    "totalOrderItemsArchived": 126,
+    "totalOrderStatusHistoryArchived": 619,
+    "totalShipmentsArchived": 22,
+    "totalPaymentsArchived": 125,
+    "totalBookingStatusHistoryArchived": 219,
+    "totalBookingActionTokensArchived": 40,
+    "liveOrdersRemaining": 0,
+    "liveBookingsRemaining": 0,
+    "genuineBusinessRecordsPreserved": {
+      "products": 22,
+      "services": 5,
+      "portfolioDesigns": 60,
+      "users": 307
+    }
   },
   "developerSmokeTestRecordsPreserved": {
     "orders": [

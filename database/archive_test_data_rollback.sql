@@ -17,6 +17,10 @@ SELECT * FROM _archive_bookings
 ON CONFLICT (id) DO NOTHING;
 
 -- 2. Restore Dependents
+INSERT INTO shipments
+SELECT * FROM _archive_shipments
+ON CONFLICT (id) DO NOTHING;
+
 INSERT INTO order_items
 SELECT * FROM _archive_order_items
 ON CONFLICT (id) DO NOTHING;
