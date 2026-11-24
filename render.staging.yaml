@@ -81,3 +81,11 @@ services:
         sync: false
       - key: ADMIN_INVITE_SECRET
         sync: false
+
+      # Customer Email Passwordless Auth (Resend - Staging)
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        value: Nails by Divya <auth@nailsbydivya.store>
+      - key: FRONTEND_BASE_URL
+        value: https://staging.nailsbydivya.store
