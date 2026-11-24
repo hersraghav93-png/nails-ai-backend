@@ -15,6 +15,7 @@ const CONFIG = require("../config");
 let firebaseApp = null;
 let testTokenVerifier = null;
 let testAdminUserLookup = null;
+let testEmailCustomTokenIssuer = null;
 
 /**
  * Checks whether the environment is strictly a test runner execution.
@@ -102,11 +103,129 @@ function setTestTokenVerifier(verifierFn, adminLookupFn = null) {
 }
 
 /**
+ * Hook for test environments to issue deterministic custom tokens after backend email verification.
+ * Strictly forbidden outside test runner environments.
+ *
+ * @param {(email: string, existingFirebaseUid?: string|null) => Promise<{ uid: string, customToken: string }>} issuerFn
+ */
+function setTestEmailCustomTokenIssuer(issuerFn) {
+  if (!isTestEnvironment()) {
+    throw new Error("setTestEmailCustomTokenIssuer is strictly forbidden outside test environments (NODE_ENV must be 'test')!");
+  }
+  testEmailCustomTokenIssuer = issuerFn;
+}
+
+/**
  * Clears the test token verifier hook.
  */
 function clearTestTokenVerifier() {
   testTokenVerifier = null;
   testAdminUserLookup = null;
+  testEmailCustomTokenIssuer = null;
+}
+
+/**
+ * Issues a Firebase custom token for a customer whose email address has already been
+ * cryptographically verified on the backend via single-use magic link.
+ *
+ * @param {string} verifiedEmail Lowercase verified customer email address
+ * @param {string|null} [existingFirebaseUid=null] Existing bound Firebase UID if user already has one
+ * @returns {Promise<{ uid: string, customToken: string }>}
+ */
+async function issueEmailVerifiedCustomToken(verifiedEmail, existingFirebaseUid = null) {
+  const cleanEmail = typeof verifiedEmail === "string" ? verifiedEmail.trim().toLowerCase() : "";
+  if (!cleanEmail || !cleanEmail.includes("@")) {
+    const err = new Error("Verified email address is required.");
+    err.code = "INVALID_EMAIL";
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (testEmailCustomTokenIssuer && isTestEnvironment()) {
+    return await testEmailCustomTokenIssuer(cleanEmail, existingFirebaseUid);
+  }
+
+  if (!firebaseApp) {
+    initFirebase();
+  }
+
+  if (!firebaseApp) {
+    const err = new Error("Authentication service is not configured. Please contact support.");
+    err.code = "AUTH_SERVICE_UNCONFIGURED";
+    err.statusCode = 503;
+    throw err;
+  }
+
+  const auth = getAuth(firebaseApp);
+  let fbUser = null;
+
+  if (existingFirebaseUid && typeof existingFirebaseUid === "string" && existingFirebaseUid.trim()) {
+    try {
+      const candidate = await auth.getUser(existingFirebaseUid.trim());
+      if (candidate.disabled) {
+        const err = new Error("Account has been deactivated or suspended. Please contact customer support.");
+        err.code = "ACCOUNT_SUSPENDED";
+        err.statusCode = 403;
+        throw err;
+      }
+      if (candidate.email && candidate.email.toLowerCase() !== cleanEmail) {
+        const err = new Error("Account conflict: Existing account identity is already bound to a different verified email.");
+        err.code = "ACCOUNT_LINK_CONFLICT";
+        err.statusCode = 409;
+        throw err;
+      }
+      if (!candidate.email || !candidate.emailVerified) {
+        fbUser = await auth.updateUser(candidate.uid, {
+          email: cleanEmail,
+          emailVerified: true,
+        });
+      } else {
+        fbUser = candidate;
+      }
+    } catch (lookupErr) {
+      if (lookupErr.statusCode) throw lookupErr;
+      if (lookupErr.code !== "auth/user-not-found") {
+        throw lookupErr;
+      }
+    }
+  }
+
+  if (!fbUser) {
+    try {
+      const byEmail = await auth.getUserByEmail(cleanEmail);
+      if (byEmail.disabled) {
+        const err = new Error("Account has been deactivated or suspended. Please contact customer support.");
+        err.code = "ACCOUNT_SUSPENDED";
+        err.statusCode = 403;
+        throw err;
+      }
+      if (!byEmail.emailVerified) {
+        fbUser = await auth.updateUser(byEmail.uid, { emailVerified: true });
+      } else {
+        fbUser = byEmail;
+      }
+    } catch (emailErr) {
+      if (emailErr.statusCode) throw emailErr;
+      if (emailErr.code === "auth/user-not-found") {
+        fbUser = await auth.createUser({
+          email: cleanEmail,
+          emailVerified: true,
+        });
+      } else {
+        throw emailErr;
+      }
+    }
+  }
+
+  const customToken = await auth.createCustomToken(fbUser.uid, {
+    authMethod: "email_magic_link",
+    emailVerified: true,
+  });
+
+  return {
+    uid: fbUser.uid,
+    customToken,
+  };
 }
 
 /**
@@ -321,7 +440,9 @@ module.exports = {
   isFirebaseAdminConfigured,
   verifyIdToken,
   verifyFirebaseAdminUser,
+  issueEmailVerifiedCustomToken,
   setTestTokenVerifier,
+  setTestEmailCustomTokenIssuer,
   clearTestTokenVerifier,
   isTestEnvironment,
 };

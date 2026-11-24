@@ -151,6 +151,28 @@ const CONFIG = {
       studioPhoneNumber: process.env.STUDIO_WHATSAPP_PHONE || "+919811000001",
     },
   },
+  // Passwordless Customer Email Authentication & Resend Configuration (Phase 2)
+  emailAuth: (() => {
+    const envName = (process.env.NODE_ENV || "development").toLowerCase().trim();
+    const defaultFrontendUrl =
+      envName === "production" || envName === "prod"
+        ? "https://nailsbydivya.store"
+        : envName === "staging" || envName === "stage"
+          ? "https://staging.nailsbydivya.store"
+          : "http://localhost:8080";
+    const resendApiKey = (process.env.RESEND_API_KEY || "").trim();
+    const resendFromEmail = (
+      process.env.RESEND_FROM_EMAIL || "Nails by Divya <auth@nailsbydivya.store>"
+    ).trim();
+    return {
+      resendApiKey,
+      resendFromEmail,
+      isResendConfigured: Boolean(resendApiKey),
+      tokenTtlMinutes: 15,
+      maxRequestsPerEmailWindow: parseInt(process.env.EMAIL_AUTH_MAX_PER_EMAIL_15M || "5", 10),
+      frontendBaseUrl: (process.env.FRONTEND_BASE_URL || defaultFrontendUrl).replace(/\/+$/, ""),
+    };
+  })(),
 };
 
 console.log(`⚙️  [Config Verification] Loaded configuration (env: ${CONFIG.nodeEnv}).`);

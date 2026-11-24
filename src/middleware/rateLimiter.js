@@ -91,6 +91,18 @@ const authRateLimiter = createRateLimiter({
   message: "Too many authentication attempts. Please wait before retrying.",
 });
 
+const emailRequestRateLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 10, // Max 10 email magic-link requests per 15 min per IP
+  message: "Too many sign-in link requests. Please wait a few minutes before requesting another link.",
+});
+
+const emailVerifyRateLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 15, // Max 15 verification attempts per 15 min per IP
+  message: "Too many verification attempts. Please wait a few minutes and try again.",
+});
+
 const chatRateLimiter = createRateLimiter({
   windowMs: 60 * 1000,
   max: 20, // 20 requests/min for AI customer support
@@ -101,5 +113,7 @@ module.exports = {
   createRateLimiter,
   adminRateLimiter,
   authRateLimiter,
+  emailRequestRateLimiter,
+  emailVerifyRateLimiter,
   chatRateLimiter,
 };

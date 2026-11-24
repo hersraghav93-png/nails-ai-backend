@@ -10,8 +10,57 @@
 
 const express = require("express");
 const { requireAuth } = require("../middleware/auth");
+const { emailRequestRateLimiter, emailVerifyRateLimiter } = require("../middleware/rateLimiter");
+const { requestMagicLink, verifyMagicLink } = require("../services/emailAuthService");
 
 const router = express.Router();
+
+/**
+ * POST /api/auth/email/request-link
+ * Requests a passwordless, single-use, 15-minute customer login link sent via Resend.
+ * Anti-enumeration: always returns a uniform generic success message for valid email formats.
+ */
+router.post("/email/request-link", emailRequestRateLimiter, async (req, res) => {
+  try {
+    const email = req.body && req.body.email;
+    const origin = req.headers.origin || null;
+    const result = await requestMagicLink({
+      email,
+      origin,
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"] || null,
+    });
+    return res.json(result);
+  } catch (err) {
+    const status = err.statusCode || 400;
+    return res.status(status).json({
+      error: err.message || "Unable to send sign-in email.",
+      code: err.code || "EMAIL_REQUEST_FAILED",
+    });
+  }
+});
+
+/**
+ * POST /api/auth/email/verify-link
+ * Atomically verifies a single-use hashed email login token, associates historical
+ * guest orders/bookings with the verified email, and returns a Firebase custom token.
+ */
+router.post("/email/verify-link", emailVerifyRateLimiter, async (req, res) => {
+  try {
+    const token = req.body && req.body.token;
+    const result = await verifyMagicLink({
+      token,
+      ipAddress: req.ip,
+    });
+    return res.json(result);
+  } catch (err) {
+    const status = err.statusCode || 401;
+    return res.status(status).json({
+      error: err.message || "Invalid or expired sign-in link.",
+      code: err.code || "TOKEN_INVALID",
+    });
+  }
+});
 
 /**
  * GET /api/auth/me

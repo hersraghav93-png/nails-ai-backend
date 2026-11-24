@@ -95,7 +95,14 @@ async function findOrCreateUserByFirebaseToken(decodedToken) {
 
   const cleanUid = uid.trim();
   const cleanPhone = phone_number && isValidPhone(phone_number) ? phone_number.trim() : null;
-  const cleanEmail = email && typeof email === "string" && email.includes("@") ? email.trim().toLowerCase() : null;
+  const isEmailVerified =
+    decodedToken.email_verified === true ||
+    decodedToken.emailVerified === true ||
+    (CONFIG.isTest() && decodedToken.email_verified !== false);
+  const cleanEmail =
+    isEmailVerified && email && typeof email === "string" && email.includes("@")
+      ? email.trim().toLowerCase()
+      : null;
 
   // 1. Look up existing user by firebase_uid
   let userRes = await query(
@@ -106,6 +113,28 @@ async function findOrCreateUserByFirebaseToken(decodedToken) {
   );
 
   let user = userRes.rows[0];
+
+  // If user already matched by firebase_uid and now presents a newly verified email, backfill safely
+  if (user && !user.email && cleanEmail) {
+    const conflictEmailRes = await query(
+      `SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND id <> $2;`,
+      [cleanEmail, user.id]
+    );
+    if (conflictEmailRes.rows.length === 0) {
+      const emailSyncRes = await query(
+        `UPDATE users
+         SET email = $1,
+             email_verified_at = COALESCE(email_verified_at, CURRENT_TIMESTAMP),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2 AND email IS NULL
+         RETURNING id, firebase_uid, phone, phone_verified_at, email, email_verified_at, is_active, created_at, updated_at;`,
+        [cleanEmail, user.id]
+      );
+      if (emailSyncRes.rows.length > 0) {
+        user = emailSyncRes.rows[0];
+      }
+    }
+  }
 
   // 2. If not found by firebase_uid, check if user exists by verified phone number
   if (!user && cleanPhone) {
