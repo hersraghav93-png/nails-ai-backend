@@ -86,6 +86,6 @@ services:
       - key: RESEND_API_KEY
         sync: false
       - key: RESEND_FROM_EMAIL
-        value: Nails by Divya <auth@nailsbydivya.store>
+        value: Nails by Divya <login@auth.nailsbydivya.store>
       - key: FRONTEND_BASE_URL
         value: https://staging.nailsbydivya.store

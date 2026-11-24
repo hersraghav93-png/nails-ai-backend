@@ -162,7 +162,7 @@ const CONFIG = {
           : "http://localhost:8080";
     const resendApiKey = (process.env.RESEND_API_KEY || "").trim();
     const resendFromEmail = (
-      process.env.RESEND_FROM_EMAIL || "Nails by Divya <auth@nailsbydivya.store>"
+      process.env.RESEND_FROM_EMAIL || "Nails by Divya <login@auth.nailsbydivya.store>"
     ).trim();
     return {
       resendApiKey,

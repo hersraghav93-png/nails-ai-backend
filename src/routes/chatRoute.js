@@ -19,11 +19,33 @@ const router = express.Router();
  * Common handler for GET / and GET /health
  * Returns comprehensive operational telemetry across database, knowledge, and AI.
  */
+function getSafeDatabaseTarget() {
+  if (CONFIG.database.url) {
+    try {
+      const parsed = new URL(CONFIG.database.url);
+      return {
+        targetHost: parsed.hostname || null,
+        targetName: parsed.pathname.replace(/^\/+/, "") || null,
+      };
+    } catch {
+      return {
+        targetHost: null,
+        targetName: null,
+      };
+    }
+  }
+  return {
+    targetHost: CONFIG.database.host || null,
+    targetName: CONFIG.database.database || null,
+  };
+}
+
 async function handleHealthCheck(req, res) {
   const dbHealth = await checkHealth();
   const knowledgeStats = getKnowledgeStatus();
 
   const isHealthy = dbHealth.status === "connected" && knowledgeStats.isLoaded;
+  const dbTarget = !CONFIG.isProduction() ? getSafeDatabaseTarget() : null;
 
   const payload = {
     status: isHealthy ? "healthy" : "degraded",
@@ -35,6 +57,7 @@ async function handleHealthCheck(req, res) {
       latencyMs: dbHealth.latencyMs,
       pool: dbHealth.pool,
       error: dbHealth.error,
+      ...(dbTarget || {}),
     },
     knowledge: {
       status: knowledgeStats.isLoaded ? "ready" : "unloaded",
@@ -50,6 +73,15 @@ async function handleHealthCheck(req, res) {
       status: isFirebaseAdminConfigured() ? "configured" : "unconfigured",
       projectId: CONFIG.firebase.projectId || null,
     },
+    ...(!CONFIG.isProduction()
+      ? {
+          emailAuth: {
+            resendConfigured: CONFIG.emailAuth.isResendConfigured,
+            fromEmail: CONFIG.emailAuth.resendFromEmail,
+            frontendBaseUrl: CONFIG.emailAuth.frontendBaseUrl,
+          },
+        }
+      : {}),
   };
 
   // If strict check requested via query (?strict=true) and unhealthy, return 503
