@@ -217,13 +217,24 @@ async function issueEmailVerifiedCustomToken(verifiedEmail, existingFirebaseUid 
     }
   }
 
+  // Confirm the actual Firebase Auth UserRecord has emailVerified === true
+  const verifiedRecord = await auth.getUser(fbUser.uid);
+  if (!verifiedRecord.emailVerified || !verifiedRecord.email || verifiedRecord.email.toLowerCase() !== cleanEmail) {
+    const err = new Error("Failed to confirm Firebase user emailVerified status.");
+    err.code = "FIREBASE_EMAIL_VERIFY_FAILED";
+    err.statusCode = 500;
+    throw err;
+  }
+
+  // Issue custom token without relying on a custom claim named `emailVerified`;
+  // Firebase ID tokens derive standard `email_verified: true` directly from UserRecord.emailVerified.
   const customToken = await auth.createCustomToken(fbUser.uid, {
     authMethod: "email_magic_link",
-    emailVerified: true,
   });
 
   return {
     uid: fbUser.uid,
+    emailVerified: verifiedRecord.emailVerified,
     customToken,
   };
 }

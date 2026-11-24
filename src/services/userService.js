@@ -97,8 +97,7 @@ async function findOrCreateUserByFirebaseToken(decodedToken) {
   const cleanPhone = phone_number && isValidPhone(phone_number) ? phone_number.trim() : null;
   const isEmailVerified =
     decodedToken.email_verified === true ||
-    decodedToken.emailVerified === true ||
-    (CONFIG.isTest() && decodedToken.email_verified !== false);
+    (CONFIG.isTest() && decodedToken.email_verified !== false && decodedToken.emailVerified !== false);
   const cleanEmail =
     isEmailVerified && email && typeof email === "string" && email.includes("@")
       ? email.trim().toLowerCase()

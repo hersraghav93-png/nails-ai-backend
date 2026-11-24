@@ -116,8 +116,9 @@ async function run() {
   setTestEmailCustomTokenIssuer(async (email, existingUid) => {
     const uid = existingUid || `fb_email_${crypto.createHash("md5").update(email).digest("hex").slice(0, 12)}`;
     const customToken = `custom_tok_${++customTokenSeq}_${uid}`;
+    // Standard Firebase UserRecord.emailVerified=true propagates `email_verified: true` in ID token
     customTokenRegistry.set(customToken, { uid, email, email_verified: true });
-    return { uid, customToken };
+    return { uid, emailVerified: true, customToken };
   });
 
   setTestTokenVerifier(async (bearerToken) => {
@@ -127,6 +128,10 @@ async function run() {
     }
     if (bearerToken === "unverified_email_id_token") {
       return { uid: `unverified_uid_${ts}`, email: guestEmail, email_verified: false };
+    }
+    if (bearerToken === "custom_claim_only_unverified") {
+      // Simulates an attacker/legacy token that only has custom claim emailVerified=true without standard email_verified=true
+      return { uid: `custom_only_uid_${ts}`, email: guestEmail, email_verified: false, emailVerified: true };
     }
     return null;
   });
@@ -405,13 +410,21 @@ async function run() {
       }
     });
 
-    await test("9. Unverified email claim in Firebase token is rejected from binding accounts", async () => {
+    await test("9. Unverified email claim (including spoofed emailVerified custom claim) is rejected from binding accounts", async () => {
       const userObj = await findOrCreateUserByFirebaseToken({
         uid: `unverified_uid_${ts}`,
         email: guestEmail,
         email_verified: false,
       });
       assert.strictEqual(userObj.email, null, "Unverified email claim must NOT link or bind existing email account");
+
+      const spoofedCustomObj = await findOrCreateUserByFirebaseToken({
+        uid: `custom_only_uid_${ts}`,
+        email: guestEmail,
+        email_verified: false,
+        emailVerified: true,
+      });
+      assert.strictEqual(spoofedCustomObj.email, null, "Custom claim emailVerified=true without standard email_verified=true must NOT link account");
     });
   } finally {
     // Clean up test rows in local staging DB only
@@ -423,12 +436,13 @@ async function run() {
     ]).catch(() => {});
     await query(`DELETE FROM orders WHERE LOWER(customer_email) IN ($1, $2);`, [guestEmail, otherEmail]).catch(() => {});
     await query(`DELETE FROM bookings WHERE LOWER(customer_email) IN ($1, $2);`, [guestEmail, otherEmail]).catch(() => {});
-    await query(`DELETE FROM users WHERE LOWER(email) IN ($1, $2, $3) OR firebase_uid IN ($4, $5);`, [
+    await query(`DELETE FROM users WHERE LOWER(email) IN ($1, $2, $3) OR firebase_uid IN ($4, $5, $6);`, [
       guestEmail,
       freshEmail,
       adminEmail,
       adminUid,
       `unverified_uid_${ts}`,
+      `custom_only_uid_${ts}`,
     ]).catch(() => {});
 
     clearTestTokenVerifier();
