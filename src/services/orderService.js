@@ -773,20 +773,69 @@ async function getCustomerOrders(userId, { limit = 20, offset = 0 } = {}) {
     [userId, safeLimit, safeOffset]
   );
 
+  const orderIds = ordersRes.rows.map((r) => r.id);
+  const itemsByOrderId = new Map();
+
+  if (orderIds.length > 0) {
+    const itemsRes = await query(
+      `SELECT
+         id,
+         order_id,
+         product_id,
+         product_name,
+         sku,
+         unit_price,
+         quantity,
+         total_price,
+         variant_details
+       FROM order_items
+       WHERE order_id = ANY($1::uuid[])
+       ORDER BY id ASC;`,
+      [orderIds]
+    );
+
+    for (const itemRow of itemsRes.rows) {
+      if (!itemsByOrderId.has(itemRow.order_id)) {
+        itemsByOrderId.set(itemRow.order_id, []);
+      }
+      itemsByOrderId.get(itemRow.order_id).push({
+        id: itemRow.id,
+        productId: itemRow.product_id,
+        productName: itemRow.product_name,
+        sku: itemRow.sku,
+        unitPrice: parseFloat(itemRow.unit_price),
+        quantity: itemRow.quantity,
+        totalPrice: parseFloat(itemRow.total_price),
+        variantDetails: itemRow.variant_details,
+      });
+    }
+  }
+
   return {
-    orders: ordersRes.rows.map((row) => ({
-      id: row.id,
-      orderNumber: row.order_number,
-      subtotal: parseFloat(row.subtotal),
-      discountAmount: parseFloat(row.discount_amount),
-      totalAmount: parseFloat(row.total_amount),
-      currency: row.currency,
-      orderStatus: row.order_status,
-      paymentStatus: row.payment_status,
-      fulfilmentStatus: row.fulfilment_status,
-      itemCount: row.item_count,
-      createdAt: row.created_at,
-    })),
+    orders: ordersRes.rows.map((row) => {
+      const orderItems = itemsByOrderId.get(row.id) || [];
+      const itemsSummary = orderItems.length
+        ? orderItems
+            .map((ci) => (ci.quantity > 1 ? `${ci.quantity}x ${ci.productName}` : ci.productName))
+            .join(", ")
+        : null;
+
+      return {
+        id: row.id,
+        orderNumber: row.order_number,
+        subtotal: parseFloat(row.subtotal),
+        discountAmount: parseFloat(row.discount_amount),
+        totalAmount: parseFloat(row.total_amount),
+        currency: row.currency,
+        orderStatus: row.order_status,
+        paymentStatus: row.payment_status,
+        fulfilmentStatus: row.fulfilment_status,
+        itemCount: row.item_count,
+        items: orderItems,
+        itemsSummary,
+        createdAt: row.created_at,
+      };
+    }),
     total,
     limit: safeLimit,
     offset: safeOffset,
