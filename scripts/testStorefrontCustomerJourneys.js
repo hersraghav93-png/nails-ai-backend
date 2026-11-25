@@ -96,7 +96,7 @@ async function runTests() {
       quantity: 2,
     };
 
-    const cartWithItem = await addItemToCart(guestCartId, itemData);
+    const cartWithItem = await addItemToCart({ cartId: guestCartId, sessionToken: guestSessionToken }, itemData);
     assert(cartWithItem.items.length === 1, `Cart contains 1 line item (got ${cartWithItem.items.length})`);
     assert(cartWithItem.totals.subtotal === 1998, `Subtotal for 2 sets at ₹999 is ₹1998 (got ₹${cartWithItem.totals.subtotal})`);
     assert(cartWithItem.totals.discountAmount === 800, `Festive offer discount is ₹800 (got ₹${cartWithItem.totals.discountAmount})`);
@@ -133,7 +133,7 @@ async function runTests() {
     assert(Boolean(guestClaimSecret), "Guest claim secret issued for guest order access");
 
     // Cart items should be cleared after checkout
-    const postCheckoutCart = await getCartDetails(guestCartId);
+    const postCheckoutCart = await getCartDetails({ cartId: guestCartId, sessionToken: guestSessionToken });
     assert(postCheckoutCart.items.length === 0, "Shopping cart emptied automatically after successful order creation");
   } catch (err) {
     console.error("Test 2 error:", err);
@@ -152,7 +152,7 @@ async function runTests() {
 
     // 1. Create a guest cart with item CAS-004
     const tempGuestCart = await getOrCreateCart(null, null);
-    await addItemToCart(tempGuestCart.id, {
+    await addItemToCart({ cartId: tempGuestCart.id, sessionToken: tempGuestCart.session_token }, {
       sku: "CAS-004",
       shape: "Oval",
       length: "Short",
@@ -250,7 +250,7 @@ async function runTests() {
   try {
     // Create new cart and verify client cannot manipulate unit price
     const tamperCart = await getOrCreateCart(null, null);
-    await addItemToCart(tamperCart.id, {
+    await addItemToCart({ cartId: tamperCart.id, sessionToken: tamperCart.session_token }, {
       sku: "PAR-003", // Base price ₹1299 -> Festive ₹599
       shape: "Coffin",
       length: "Long",
@@ -261,7 +261,7 @@ async function runTests() {
       total_amount: 1.0,
     });
 
-    const pricedCart = await getCartDetails(tamperCart.id);
+    const pricedCart = await getCartDetails({ cartId: tamperCart.id, sessionToken: tamperCart.session_token });
     assert(pricedCart.items[0].unitPrice === 599, `Server enforced official ₹599 festive price, ignoring client price 1.0 (got ₹${pricedCart.items[0].unitPrice})`);
     assert(pricedCart.totals.totalAmount === 599, `Server recalculated grand total to ₹599 (got ₹${pricedCart.totals.totalAmount})`);
     assert(pricedCart.totals.shippingFee === 0, "Delivery fee is ₹0 baseline (charges confirmed by studio prior to fulfilment)");
@@ -293,7 +293,7 @@ async function runTests() {
     // 3. Idempotency replay check
     const idempotencyKey = `nbd-test-idemp-${Date.now()}`;
     const idempCart = await getOrCreateCart(null, null);
-    await addItemToCart(idempCart.id, {
+    await addItemToCart({ cartId: idempCart.id, sessionToken: idempCart.session_token }, {
       sku: "WORK-002",
       shape: "Round",
       length: "Short",

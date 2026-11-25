@@ -614,8 +614,8 @@ async function runCommerceTestSuite() {
 
       // Verify in DB that only 1 order exists for this idempotency key
       const dbCheck = await query(
-        `SELECT COUNT(*)::int AS count FROM orders WHERE guest_session_token = $1;`,
-        [`idem:${testIdempotencyKey}`]
+        `SELECT COUNT(*)::int AS count FROM checkout_attempts WHERE order_id = $1;`,
+        [originalOrderId]
       );
       assert.strictEqual(dbCheck.rows[0].count, 1);
     });

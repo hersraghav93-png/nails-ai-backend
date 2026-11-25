@@ -220,14 +220,12 @@ async function runStagingSmokeTests() {
     // --------------------------------------------------------------------------
     console.log("\n▶ [Test 3] Shopping Cart Lifecycle & Guest Cart Claiming");
 
-    let guestSessionToken = `staging_guest_${Date.now()}`;
     let createdCart;
 
     await it("Guest adds handcrafted set to shopping cart with custom sizing", async () => {
-      const cartRes = await getOrCreateCart(guestSessionToken, null);
-      createdCart = cartRes;
+      createdCart = await getOrCreateCart(null, null);
 
-      const priced = await addItemToCart(createdCart.id, {
+      const priced = await addItemToCart({ cartId: createdCart.id, sessionToken: createdCart.session_token }, {
         sku: "WED-005",
         quantity: 1,
         shape: "Almond",
@@ -242,10 +240,10 @@ async function runStagingSmokeTests() {
     });
 
     await it("Authenticated customer claims guest cart ownership", async () => {
-      const claimed = await claimGuestCart(guestSessionToken, customerUser.id);
+      const claimed = await claimGuestCart(createdCart.session_token, customerUser.id);
       assert.strictEqual(claimed.user_id, customerUser.id, "Cart ownership transferred to customer");
 
-      const claimedDetails = await getCartDetails(claimed.id);
+      const claimedDetails = await getCartDetails({ cartId: claimed.id, userId: customerUser.id });
       assert.strictEqual(claimedDetails.items.length, 1);
       assert.strictEqual(claimedDetails.items[0].sku, "WED-005");
     });

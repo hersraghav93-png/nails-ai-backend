@@ -17,8 +17,9 @@
 
 const crypto = require("crypto");
 const { getPool, query } = require("../db/pool");
+const { resolveCart } = require("./cartService");
 const { calculateItemPricing, calculateCartTotals } = require("./pricingEngine");
-const { queueNotification } = require("./notifications/notificationService");
+const { queueNotification, processNotificationJob } = require("./notifications/notificationService");
 
 // Allowed status values matching database check constraints
 const ALLOWED_ORDER_STATUSES = [
@@ -181,6 +182,24 @@ function validateShippingAddress(addr) {
   };
 }
 
+function digest(value) {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+function checkoutError(message, code, statusCode) {
+  return Object.assign(new Error(message), { code, statusCode });
+}
+
+function assertOrderAccess(order, { userId, sessionToken, claimSecret, isAdmin }) {
+  if (isAdmin || (userId && order.user_id === userId)) return;
+  if (!order.user_id && !order.claimed_at && !order.claimed_by_user_id && order.guest_claim_hash) {
+    if (claimSecret && digest(claimSecret.trim()) === order.guest_claim_hash) return;
+    // Older keyed orders stored "idem:<key>" here. Their issued claim secret still works.
+    if (sessionToken && !sessionToken.startsWith("idem:") && sessionToken === order.guest_session_token) return;
+  }
+  throw checkoutError("You do not have permission to access this order.", "FORBIDDEN_ORDER_ACCESS", 403);
+}
+
 /**
  * Creates a new order from a shopping cart within an atomic PostgreSQL transaction.
  *
@@ -204,66 +223,54 @@ async function createOrderFromCart({
   customerNotes = null,
   idempotencyKey = null,
   ipAddress = null,
+  retryOnly = false,
 }) {
-  const validatedCustomer = validateCustomerDetails(customer);
-  const validatedAddress = validateShippingAddress(shippingAddress);
+  const validatedCustomer = retryOnly ? null : validateCustomerDetails(customer);
+  const validatedAddress = retryOnly ? null : validateShippingAddress(shippingAddress);
+  const notes = typeof customerNotes === "string" ? customerNotes.slice(0, 500) || null : null;
+  if (cartId != null && (typeof cartId !== "string" || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(cartId))) {
+    throw checkoutError("Cart not found.", "CART_NOT_FOUND", 404);
+  }
+  if (idempotencyKey != null && (typeof idempotencyKey !== "string" || !idempotencyKey.trim() || idempotencyKey.length > 256)) {
+    throw checkoutError("Invalid checkout retry key.", "INVALID_CHECKOUT_KEY", 400);
+  }
+  if (retryOnly && (!idempotencyKey || !cartId)) {
+    throw checkoutError("Cart and retry key are required.", "INVALID_CHECKOUT_ATTEMPT", 400);
+  }
+  if (!userId && !sessionToken) throw checkoutError("Cart session required.", "CART_NOT_FOUND", 404);
+  const attemptHash = idempotencyKey && digest(JSON.stringify([
+    userId ? "account" : "guest", userId || sessionToken, idempotencyKey.trim(),
+  ]));
+  const requestHash = attemptHash && !retryOnly && digest(JSON.stringify([validatedCustomer, validatedAddress, notes]));
 
   const pool = getPool();
   const client = await pool.connect();
 
+  let released = false;
   try {
     await client.query("BEGIN;");
 
-    // 1. Idempotency Check: Prevent duplicate order placement on network retries
-    if (idempotencyKey && typeof idempotencyKey === "string" && idempotencyKey.trim()) {
-      const cleanKey = idempotencyKey.trim();
-      const existingOrderRes = await client.query(
-        `SELECT id, order_number, user_id, total_amount, order_status, payment_status, created_at 
-         FROM orders 
-         WHERE guest_session_token = $1 
-            OR artist_internal_notes = $2;`,
-        [`idem:${cleanKey}`, `[IDEMPOTENCY_KEY: ${cleanKey}]`]
+    if (attemptHash) {
+      // Lock the attempt before any cart. A waiter sees the committed receipt even
+      // if the first transaction emptied, merged or subsequently expired the cart.
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [attemptHash]);
+      const receipt = await client.query(
+        "SELECT order_id, cart_id, request_hash FROM checkout_attempts WHERE attempt_hash = $1", [attemptHash]
       );
-
-      if (existingOrderRes.rows.length > 0) {
-        await client.query("COMMIT;");
-        const existingOrder = existingOrderRes.rows[0];
-        const fullExisting = await getOrderById(existingOrder.id, {
-          userId,
-          sessionToken,
-          isAdmin: false,
-          skipAuthCheck: true,
-        });
-        return {
-          ...fullExisting,
-          isDuplicate: true,
-          message: "Order previously submitted and recorded (idempotent response).",
-        };
+      const prior = receipt.rows[0];
+      if (prior) {
+        const details = await getOrderById(prior.order_id, { userId, sessionToken }, client);
+        if ((cartId && prior.cart_id !== cartId.toLowerCase()) || (!retryOnly && requestHash !== prior.request_hash)) {
+          throw checkoutError("This checkout attempt already has a different order.", "IDEMPOTENCY_KEY_CONFLICT", 409);
+        }
+        await client.query("COMMIT");
+        return { ...details, isDuplicate: true };
       }
+      if (retryOnly) throw checkoutError("This checkout attempt has no receipt yet.", "CHECKOUT_ATTEMPT_NOT_FOUND", 404);
     }
 
-    // 2. Resolve and Validate Cart
-    const cartRes = await client.query(
-      `SELECT * FROM carts WHERE id = $1 AND expires_at > CURRENT_TIMESTAMP FOR UPDATE;`,
-      [cartId]
-    );
-
-    if (cartRes.rows.length === 0) {
-      const err = new Error("Cart not found or session has expired.");
-      err.code = "CART_NOT_FOUND";
-      err.statusCode = 404;
-      throw err;
-    }
-
-    const cart = cartRes.rows[0];
-
-    // Verify cart ownership if authenticated
-    if (userId && cart.user_id && cart.user_id !== userId) {
-      const err = new Error("Unauthorized: Cart does not belong to the authenticated user.");
-      err.code = "CART_ACCESS_DENIED";
-      err.statusCode = 403;
-      throw err;
-    }
+    const cart = await resolveCart(client, { cartId, sessionToken, userId });
+    cartId = cart.id;
 
     // 3. Retrieve Cart Items
     const itemsRes = await client.query(
@@ -333,13 +340,7 @@ async function createOrderFromCart({
       guestClaimHash = crypto.createHash("sha256").update(claimSecret).digest("hex");
     }
 
-    const guestSessionToken = idempotencyKey
-      ? `idem:${idempotencyKey.trim()}`
-      : (sessionToken || cart.session_token);
-
-    const artistInternalNotes = idempotencyKey
-      ? `[IDEMPOTENCY_KEY: ${idempotencyKey.trim()}]`
-      : null;
+    const guestSessionToken = userId ? null : cart.session_token;
 
     // 7. Insert Order Record
     const orderInsertRes = await client.query(
@@ -360,9 +361,8 @@ async function createOrderFromCart({
          payment_status,
          fulfilment_status,
          guest_claim_hash,
-         customer_notes,
-         artist_internal_notes
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+         customer_notes
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
        RETURNING *;`,
       [
         orderNumber,
@@ -381,12 +381,18 @@ async function createOrderFromCart({
         "PENDING",
         "UNFULFILLED",
         guestClaimHash,
-        customerNotes ? customerNotes.substring(0, 500) : null,
-        artistInternalNotes,
+        notes,
       ]
     );
 
     const order = orderInsertRes.rows[0];
+
+    if (attemptHash) {
+      await client.query(
+        `INSERT INTO checkout_attempts (attempt_hash, request_hash, cart_id, order_id)
+         VALUES ($1, $2, $3, $4)`, [attemptHash, requestHash, cartId, order.id]
+      );
+    }
 
     // 8. Insert Immutable Order Item Snapshots
     const createdItems = [];
@@ -474,7 +480,6 @@ async function createOrderFromCart({
           order_number: order.order_number,
           total_amount: order.total_amount,
           item_count: pricedItems.length,
-          idempotency_key: idempotencyKey || null,
         }),
         formatInetIp(ipAddress),
       ]
@@ -489,28 +494,32 @@ async function createOrderFromCart({
       [cartId]
     );
 
+    // Commit the confirmation job with its order. Delivery happens after releasing all locks.
+    const itemsSummary = createdItems.map((i) => `${i.quantity}x ${i.product_name}`).join(", ");
+    const addr = order.shipping_address || {};
+    const addrStr = `${addr.address_line1 || ""}, ${addr.city || ""}, PIN ${addr.postal_code || ""}`;
+
+    const confirmation = await queueNotification({
+      autoDispatch: false,
+      channel: "whatsapp",
+      recipientPhone: order.customer_phone,
+      templateKey: "ORDER_CONFIRMED",
+      variables: {
+        customerName: order.customer_name,
+        orderNumber: order.order_number,
+        orderId: order.id,
+        itemsSummary,
+        totalAmount: order.total_amount,
+        deliveryAddress: addrStr,
+      },
+      idempotencyKey: `order_${order.id}_confirmed`,
+    }, client);
+
     await client.query("COMMIT;");
-
-    // Queue customer order confirmation notification
+    client.release();
+    released = true;
     try {
-      const itemsSummary = createdItems.map((i) => `${i.quantity}x ${i.product_name}`).join(", ");
-      const addr = order.shipping_address || {};
-      const addrStr = `${addr.address_line1 || ""}, ${addr.city || ""}, PIN ${addr.postal_code || ""}`;
-
-      await queueNotification({
-        channel: "whatsapp",
-        recipientPhone: order.customer_phone,
-        templateKey: "ORDER_CONFIRMED",
-        variables: {
-          customerName: order.customer_name,
-          orderNumber: order.order_number,
-          orderId: order.id,
-          itemsSummary,
-          totalAmount: order.total_amount,
-          deliveryAddress: addrStr,
-        },
-        idempotencyKey: `order_${order.id}_confirmed`,
-      });
+      if (confirmation.isNew) await processNotificationJob(confirmation.job.id);
     } catch (notifErr) {
       console.warn(`⚠️ [Order Notification Error] Order ${order.id}: ${notifErr.message}`);
     }
@@ -548,10 +557,13 @@ async function createOrderFromCart({
       claimSecret, // Provided to guest for future lookup / account claiming
     };
   } catch (err) {
-    await client.query("ROLLBACK;");
+    if (!released) await client.query("ROLLBACK;");
+    if (attemptHash && err.code === "42P01" && err.message.includes("checkout_attempts")) {
+      throw checkoutError("Checkout confirmation is temporarily unavailable. Please retry.", "CHECKOUT_RETRY_UNAVAILABLE", 503);
+    }
     throw err;
   } finally {
-    client.release();
+    if (!released) client.release();
   }
 }
 
@@ -559,14 +571,12 @@ async function createOrderFromCart({
  * Retrieves an order by ID with strict ownership verification.
  *
  * @param {string} orderId Order UUID
- * @param {object} authContext { userId, sessionToken, claimSecret, isAdmin, skipAuthCheck }
+ * @param {object} authContext { userId, sessionToken, claimSecret, isAdmin }
  * @returns {Promise<object>}
  */
-async function getOrderById(orderId, authContext = {}) {
-  const { userId, sessionToken, claimSecret, isAdmin, skipAuthCheck } = authContext || {};
-
-  const orderRes = await query(
-    `SELECT * FROM orders WHERE id = $1;`,
+async function getOrderById(orderId, authContext = {}, db = { query }) {
+  const orderRes = await db.query(
+    `SELECT * FROM orders WHERE id = $1 FOR SHARE;`,
     [orderId]
   );
 
@@ -579,49 +589,16 @@ async function getOrderById(orderId, authContext = {}) {
 
   const order = orderRes.rows[0];
 
-  // Ownership verification: prevent cross-customer access
-  if (!skipAuthCheck && !isAdmin) {
-    let isAuthorized = false;
-
-    // Check if user is the authenticated owner
-    if (userId && order.user_id === userId) {
-      isAuthorized = true;
-    }
-
-    // Check if guest claim secret matches
-    if (!isAuthorized && claimSecret && order.guest_claim_hash) {
-      const hashedSecret = crypto.createHash("sha256").update(claimSecret.trim()).digest("hex");
-      if (hashedSecret === order.guest_claim_hash) {
-        isAuthorized = true;
-      }
-    }
-
-    // Check if guest session token matches
-    if (!isAuthorized && sessionToken) {
-      if (
-        order.guest_session_token === sessionToken ||
-        order.guest_session_token === `idem:${sessionToken}`
-      ) {
-        isAuthorized = true;
-      }
-    }
-
-    if (!isAuthorized) {
-      const err = new Error("Access denied: You do not have permission to view this order.");
-      err.code = "FORBIDDEN_ORDER_ACCESS";
-      err.statusCode = 403;
-      throw err;
-    }
-  }
+  assertOrderAccess(order, authContext);
 
   // Fetch items
-  const itemsRes = await query(
+  const itemsRes = await db.query(
     `SELECT * FROM order_items WHERE order_id = $1 ORDER BY id ASC;`,
     [orderId]
   );
 
   // Fetch status history
-  const historyRes = await query(
+  const historyRes = await db.query(
     `SELECT id, status_type, from_status, to_status, actor_type, notes, created_at 
      FROM order_status_history 
      WHERE order_id = $1 
@@ -630,7 +607,7 @@ async function getOrderById(orderId, authContext = {}) {
   );
 
   // Retrieve shipment information
-  const shipmentRes = await query(
+  const shipmentRes = await db.query(
     `SELECT id, courier_name, tracking_number, tracking_url, dispatched_at, delivered_at, created_at
      FROM shipments
      WHERE order_id = $1
@@ -640,7 +617,7 @@ async function getOrderById(orderId, authContext = {}) {
   );
 
   // Retrieve related communication history
-  const notificationsRes = await query(
+  const notificationsRes = await db.query(
     `SELECT id, channel, template_name, status, retry_count, scheduled_for, created_at,
             template_variables->>'__manualWaLink' AS manual_wa_link
      FROM notification_jobs
@@ -651,7 +628,7 @@ async function getOrderById(orderId, authContext = {}) {
   );
 
   // Retrieve verified payment ledger record if present
-  const paymentRes = await query(
+  const paymentRes = await db.query(
     `SELECT id, payment_method, amount, currency, status, gateway_payment_id, verified_at, created_at
      FROM payments
      WHERE order_id = $1
@@ -850,7 +827,7 @@ async function getCustomerOrders(userId, { limit = 20, offset = 0 } = {}) {
  * @returns {Promise<object>} Updated order details
  */
 async function cancelOrder(orderId, authContext = {}) {
-  const { userId, sessionToken, claimSecret, isAdmin, reason } = authContext;
+  const { userId, isAdmin, reason } = authContext;
 
   const pool = getPool();
   const client = await pool.connect();
@@ -872,30 +849,7 @@ async function cancelOrder(orderId, authContext = {}) {
 
     const order = orderRes.rows[0];
 
-    // Ownership check
-    if (!isAdmin) {
-      let isAuthorized = false;
-      if (userId && order.user_id === userId) isAuthorized = true;
-      if (!isAuthorized && claimSecret && order.guest_claim_hash) {
-        const hashedSecret = crypto.createHash("sha256").update(claimSecret.trim()).digest("hex");
-        if (hashedSecret === order.guest_claim_hash) isAuthorized = true;
-      }
-      if (!isAuthorized && sessionToken) {
-        if (
-          order.guest_session_token === sessionToken ||
-          order.guest_session_token === `idem:${sessionToken}`
-        ) {
-          isAuthorized = true;
-        }
-      }
-
-      if (!isAuthorized) {
-        const err = new Error("Access denied: You do not have permission to cancel this order.");
-        err.code = "FORBIDDEN_ORDER_ACCESS";
-        err.statusCode = 403;
-        throw err;
-      }
-    }
+    assertOrderAccess(order, authContext);
 
     // Cancellation eligibility check: can only cancel before production starts and when unpaid
     if (order.order_status !== "PENDING") {
@@ -968,12 +922,7 @@ async function cancelOrder(orderId, authContext = {}) {
       console.warn(`⚠️ [Order Notification Error] Order ${order.id}: ${notifErr.message}`);
     }
 
-    return getOrderById(orderId, {
-      userId,
-      sessionToken,
-      isAdmin,
-      skipAuthCheck: true,
-    });
+    return getOrderById(orderId, authContext);
   } catch (err) {
     await client.query("ROLLBACK;");
     throw err;
@@ -1406,7 +1355,7 @@ async function adminUpdateOrderStatus(orderId, updateData, adminUser, ipAddress 
       }
     }
 
-    return getOrderById(orderId, { isAdmin: true, skipAuthCheck: true });
+    return getOrderById(orderId, { isAdmin: true });
   } catch (err) {
     await client.query("ROLLBACK;");
     throw err;
@@ -1631,7 +1580,7 @@ async function adminVerifyOrderPayment(orderId, verifyData, adminUser, ipAddress
 
         // Exact match with same idempotency key: return original successful result
         await client.query("COMMIT;");
-        const existingOrder = await getOrderById(orderId, { isAdmin: true, skipAuthCheck: true });
+        const existingOrder = await getOrderById(orderId, { isAdmin: true });
         return {
           success: true,
           orderId: order.id,
@@ -1666,7 +1615,7 @@ async function adminVerifyOrderPayment(orderId, verifyData, adminUser, ipAddress
             (incomingUtr === null || priorUtr === incomingUtr)
           ) {
             await client.query("COMMIT;");
-            const existingOrder = await getOrderById(orderId, { isAdmin: true, skipAuthCheck: true });
+            const existingOrder = await getOrderById(orderId, { isAdmin: true });
             return {
               success: true,
               orderId: order.id,
@@ -1827,7 +1776,7 @@ async function adminVerifyOrderPayment(orderId, verifyData, adminUser, ipAddress
 
     await client.query("COMMIT;");
 
-    const enriched = await getOrderById(order.id, { isAdmin: true, skipAuthCheck: true });
+    const enriched = await getOrderById(order.id, { isAdmin: true });
     return {
       success: true,
       orderId: order.id,

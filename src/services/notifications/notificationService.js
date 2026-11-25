@@ -30,6 +30,7 @@ const { sendWhatsAppNotification } = require("./whatsappAdapter");
  * @param {string} [params.idempotencyKey] Unique idempotency key
  * @param {Date} [params.scheduledFor] Optional scheduled delivery time
  * @param {boolean} [params.autoDispatch=true] Whether to attempt immediate dispatch
+ * @param {object} [db] Use the caller's transaction with autoDispatch=false to enqueue atomically.
  * @returns {Promise<{ job: object, isNew: boolean, waLink: string }>}
  */
 async function queueNotification({
@@ -41,7 +42,7 @@ async function queueNotification({
   idempotencyKey = null,
   scheduledFor = null,
   autoDispatch = true,
-}) {
+}, db = { query }) {
   if (!recipientPhone || typeof recipientPhone !== "string" || !recipientPhone.trim()) {
     throw new Error("Recipient phone number is required.");
   }
@@ -86,7 +87,7 @@ async function queueNotification({
     RETURNING *;
   `;
 
-  const insertRes = await query(insertSql, [
+  const insertRes = await db.query(insertSql, [
     channel.toLowerCase(),
     recipientPhone.trim(),
     rendered.templateName,
@@ -103,7 +104,7 @@ async function queueNotification({
     job = insertRes.rows[0];
   } else {
     // Already existed — retrieve existing record
-    const existingRes = await query(
+    const existingRes = await db.query(
       `SELECT * FROM notification_jobs WHERE idempotency_key = $1;`,
       [cleanKey]
     );

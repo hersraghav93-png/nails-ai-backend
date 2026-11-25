@@ -14,7 +14,7 @@
 "use strict";
 
 const crypto = require("crypto");
-const { query } = require("../db/pool");
+const { withTransaction } = require("../db/pool");
 const { calculateItemPricing, calculateCartTotals } = require("./pricingEngine");
 
 // Catalog shape, length, and preset specifications
@@ -124,74 +124,97 @@ function validateSizing({ shape, length, sizing_preset, custom_measurements }) {
   };
 }
 
-/**
- * Retrieves or creates a shopping cart.
- *
- * @param {string|null} sessionToken Client session token (guest or user)
- * @param {string|null} userId Authenticated user UUID
- * @returns {Promise<object>} Active cart row
- */
-async function getOrCreateCart(sessionToken, userId = null) {
-  // 1. If user is authenticated, look for active user cart first
+function cartSessionForClient(cart) {
+  // Old account carts can still contain the original guest receipt capability.
+  // Existing clients expect a session header. Account requests authenticate by user ID.
+  return cart.user_id ? `account:${cart.id}` : cart.session_token;
+}
+
+function cartNotFound() {
+  return Object.assign(new Error("Cart not found or session has expired."), {
+    code: "CART_NOT_FOUND", statusCode: 404,
+  });
+}
+
+// All callers hold this transaction until their read, mutation or checkout completes.
+async function resolveCart(client, { cartId, sessionToken = null, userId = null }, { create = false, claimOnly = false } = {}) {
+  if (cartId != null) {
+    if (typeof cartId !== "string" || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(cartId)) {
+      throw cartNotFound();
+    }
+    const result = await client.query(
+      `WITH locked AS (
+         SELECT * FROM carts WHERE id = $1
+         AND (user_id = $2 OR (user_id IS NULL AND session_token = $3)) FOR UPDATE
+       ) SELECT * FROM locked WHERE expires_at > clock_timestamp()`,
+      [cartId, userId, sessionToken]
+    );
+    if (!result.rows.length) throw cartNotFound();
+    return result.rows[0];
+  }
+
+  let ownCart;
   if (userId) {
-    const userCartRes = await query(
-      `SELECT * FROM carts 
-       WHERE user_id = $1 AND expires_at > CURRENT_TIMESTAMP 
-       ORDER BY updated_at DESC LIMIT 1;`,
-      [userId]
+    // Serialize creation/merge even when this buyer does not have a cart yet.
+    await client.query("SELECT id FROM users WHERE id = $1 FOR NO KEY UPDATE", [userId]);
+    const result = await client.query(
+      `WITH locked AS (
+         SELECT * FROM carts WHERE user_id = $1 AND expires_at > clock_timestamp()
+         ORDER BY updated_at DESC, id LIMIT 1 FOR UPDATE
+       ) SELECT * FROM locked WHERE expires_at > clock_timestamp()`, [userId]
     );
-
-    if (userCartRes.rows.length > 0) {
-      const userCart = userCartRes.rows[0];
-
-      // If a distinct guest session token was also supplied, claim/merge items into user cart
-      if (sessionToken && sessionToken !== userCart.session_token) {
-        await claimGuestCart(sessionToken, userId);
-      }
-
-      return userCart;
-    }
+    ownCart = result.rows[0];
+    if (ownCart && (ownCart.session_token === sessionToken || cartSessionForClient(ownCart) === sessionToken)) return ownCart;
   }
 
-  // 2. Look for existing cart by session token
   if (sessionToken) {
-    const cartRes = await query(
-      `SELECT * FROM carts 
-       WHERE session_token = $1 AND expires_at > CURRENT_TIMESTAMP;`,
-      [sessionToken]
+    const result = await client.query(
+      `WITH locked AS (
+         SELECT * FROM carts WHERE user_id IS NULL AND session_token = $1 FOR UPDATE
+       ) SELECT * FROM locked WHERE expires_at > clock_timestamp()`, [sessionToken]
     );
-
-    if (cartRes.rows.length > 0) {
-      const cart = cartRes.rows[0];
-
-      // Link guest cart to user if user just logged in
-      if (userId && !cart.user_id) {
-        const updatedRes = await query(
-          `UPDATE carts 
-           SET user_id = $1, expires_at = CURRENT_TIMESTAMP + ($2 || ' days')::INTERVAL, updated_at = CURRENT_TIMESTAMP 
-           WHERE id = $3 
-           RETURNING *;`,
-          [userId, USER_CART_EXPIRY_DAYS, cart.id]
-        );
-        return updatedRes.rows[0];
-      }
-
-      return cart;
+    const guestCart = result.rows[0];
+    if (guestCart) {
+      if (!userId) return guestCart;
+      if (ownCart) return mergeGuestItems(client, guestCart, ownCart);
+      // Other devices on this account must never receive the guest receipt capability.
+      const assigned = await client.query(
+        `UPDATE carts SET user_id = $1, session_token = $2,
+           expires_at = CURRENT_TIMESTAMP + $3 * INTERVAL '1 day'
+         WHERE id = $4 AND user_id IS NULL RETURNING *`,
+        [userId, crypto.randomUUID(), USER_CART_EXPIRY_DAYS, guestCart.id]
+      );
+      return assigned.rows[0];
     }
   }
 
-  // 3. Create a new cart
-  const newSessionToken = sessionToken && !sessionToken.includes(" ") ? sessionToken : crypto.randomUUID();
-  const expiryDays = userId ? USER_CART_EXPIRY_DAYS : GUEST_CART_EXPIRY_DAYS;
-
-  const insertRes = await query(
+  if (claimOnly) return null;
+  if (ownCart) return ownCart;
+  if (!create) throw cartNotFound();
+  const result = await client.query(
     `INSERT INTO carts (user_id, session_token, expires_at)
-     VALUES ($1, $2, CURRENT_TIMESTAMP + ($3 || ' days')::INTERVAL)
-     RETURNING *;`,
-    [userId, newSessionToken, expiryDays]
+     VALUES ($1, $2, CURRENT_TIMESTAMP + $3 * INTERVAL '1 day') RETURNING *`,
+    [userId, crypto.randomUUID(), userId ? USER_CART_EXPIRY_DAYS : GUEST_CART_EXPIRY_DAYS]
   );
+  return result.rows[0];
+}
 
-  return insertRes.rows[0];
+function getOrCreateCart(sessionToken, userId = null) {
+  return withTransaction((client) => resolveCart(client, { sessionToken, userId }, { create: true }));
+}
+
+function withCart(context, operation) {
+  return withTransaction(async (client) => {
+    const cart = await resolveCart(client, context, { create: true });
+    return operation(client, cart);
+  });
+}
+
+async function touchCart(client, cartId) {
+  const result = await client.query(
+    "UPDATE carts SET updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *", [cartId]
+  );
+  return result.rows[0];
 }
 
 /**
@@ -200,22 +223,9 @@ async function getOrCreateCart(sessionToken, userId = null) {
  * @param {string} cartId Cart UUID
  * @returns {Promise<object>}
  */
-async function getCartDetails(cartId) {
-  const cartRes = await query(
-    `SELECT * FROM carts WHERE id = $1;`,
-    [cartId]
-  );
-
-  if (cartRes.rows.length === 0) {
-    const err = new Error("Cart not found or session has expired.");
-    err.code = "CART_NOT_FOUND";
-    err.statusCode = 404;
-    throw err;
-  }
-
-  const cart = cartRes.rows[0];
-
-  const itemsRes = await query(
+async function readCartDetails(client, cart) {
+  const cartId = cart.id;
+  const itemsRes = await client.query(
     `SELECT 
        ci.id,
        ci.cart_id,
@@ -275,7 +285,7 @@ async function getCartDetails(cartId) {
     cart: {
       id: cart.id,
       userId: cart.user_id,
-      sessionToken: cart.session_token,
+      sessionToken: cartSessionForClient(cart),
       expiresAt: cart.expires_at,
       updatedAt: cart.updated_at,
     },
@@ -291,7 +301,8 @@ async function getCartDetails(cartId) {
  * @param {object} itemData { sku, shape, length, sizing_preset, custom_measurements, quantity }
  * @returns {Promise<object>} Full updated cart details
  */
-async function addItemToCart(cartId, itemData) {
+async function addItemToCart(client, cart, itemData) {
+  const cartId = cart.id;
   const { sku } = itemData;
   if (!sku || typeof sku !== "string") {
     const err = new Error("A valid product SKU is required.");
@@ -301,7 +312,7 @@ async function addItemToCart(cartId, itemData) {
   }
 
   // Verify product exists and is available
-  const productRes = await query(
+  const productRes = await client.query(
     `SELECT * FROM products 
      WHERE (UPPER(sku) = UPPER($1) OR id::text = $1) AND is_archived = FALSE;`,
     [sku.trim()]
@@ -328,7 +339,7 @@ async function addItemToCart(cartId, itemData) {
   const sizing = validateSizing(itemData);
 
   // Check if an identical item already exists in the cart (same product, shape, length, preset, measurements)
-  const existingRes = await query(
+  const existingRes = await client.query(
     `SELECT * FROM cart_items 
      WHERE cart_id = $1 
        AND product_id = $2 
@@ -358,12 +369,12 @@ async function addItemToCart(cartId, itemData) {
       throw err;
     }
 
-    await query(
+    await client.query(
       `UPDATE cart_items SET quantity = $1 WHERE id = $2;`,
       [newQty, existingItem.id]
     );
   } else {
-    await query(
+    await client.query(
       `INSERT INTO cart_items (cart_id, product_id, shape, length, sizing_preset, custom_measurements, quantity)
        VALUES ($1, $2, $3, $4, $5, $6, $7);`,
       [
@@ -378,13 +389,7 @@ async function addItemToCart(cartId, itemData) {
     );
   }
 
-  // Touch cart timestamp
-  await query(
-    `UPDATE carts SET updated_at = CURRENT_TIMESTAMP WHERE id = $1;`,
-    [cartId]
-  );
-
-  return getCartDetails(cartId);
+  return readCartDetails(client, await touchCart(client, cartId));
 }
 
 /**
@@ -395,8 +400,9 @@ async function addItemToCart(cartId, itemData) {
  * @param {object} updateData { quantity, shape, length, sizing_preset, custom_measurements }
  * @returns {Promise<object>} Full updated cart details
  */
-async function updateCartItem(cartId, itemId, updateData) {
-  const itemRes = await query(
+async function updateCartItem(client, cart, itemId, updateData) {
+  const cartId = cart.id;
+  const itemRes = await client.query(
     `SELECT * FROM cart_items WHERE id = $1 AND cart_id = $2;`,
     [itemId, cartId]
   );
@@ -427,7 +433,7 @@ async function updateCartItem(cartId, itemId, updateData) {
     custom_measurements: newMeasurements,
   });
 
-  await query(
+  await client.query(
     `UPDATE cart_items 
      SET quantity = $1, shape = $2, length = $3, sizing_preset = $4, custom_measurements = $5
      WHERE id = $6 AND cart_id = $7;`,
@@ -442,12 +448,7 @@ async function updateCartItem(cartId, itemId, updateData) {
     ]
   );
 
-  await query(
-    `UPDATE carts SET updated_at = CURRENT_TIMESTAMP WHERE id = $1;`,
-    [cartId]
-  );
-
-  return getCartDetails(cartId);
+  return readCartDetails(client, await touchCart(client, cartId));
 }
 
 /**
@@ -457,8 +458,9 @@ async function updateCartItem(cartId, itemId, updateData) {
  * @param {string} itemId Cart Item UUID
  * @returns {Promise<object>} Full updated cart details
  */
-async function removeCartItem(cartId, itemId) {
-  const itemRes = await query(
+async function removeCartItem(client, cart, itemId) {
+  const cartId = cart.id;
+  const itemRes = await client.query(
     `SELECT id FROM cart_items WHERE id = $1 AND cart_id = $2;`,
     [itemId, cartId]
   );
@@ -470,17 +472,12 @@ async function removeCartItem(cartId, itemId) {
     throw err;
   }
 
-  await query(
+  await client.query(
     `DELETE FROM cart_items WHERE id = $1 AND cart_id = $2;`,
     [itemId, cartId]
   );
 
-  await query(
-    `UPDATE carts SET updated_at = CURRENT_TIMESTAMP WHERE id = $1;`,
-    [cartId]
-  );
-
-  return getCartDetails(cartId);
+  return readCartDetails(client, await touchCart(client, cartId));
 }
 
 /**
@@ -489,18 +486,14 @@ async function removeCartItem(cartId, itemId) {
  * @param {string} cartId Cart UUID
  * @returns {Promise<object>} Full updated cart details
  */
-async function clearCart(cartId) {
-  await query(
+async function clearCart(client, cart) {
+  const cartId = cart.id;
+  await client.query(
     `DELETE FROM cart_items WHERE cart_id = $1;`,
     [cartId]
   );
 
-  await query(
-    `UPDATE carts SET updated_at = CURRENT_TIMESTAMP WHERE id = $1;`,
-    [cartId]
-  );
-
-  return getCartDetails(cartId);
+  return readCartDetails(client, await touchCart(client, cartId));
 }
 
 /**
@@ -512,53 +505,23 @@ async function clearCart(cartId) {
  * @param {string} userId Authenticated user UUID
  * @returns {Promise<object|null>}
  */
-async function claimGuestCart(guestSessionToken, userId) {
-  if (!guestSessionToken || !userId) return null;
+async function claimGuestCart(sessionToken, userId, { withDetails = false } = {}) {
+  if (!sessionToken || !userId) return null;
+  return withTransaction(async (client) => {
+    const cart = await resolveCart(client, { sessionToken, userId }, { claimOnly: true });
+    return cart && withDetails ? readCartDetails(client, cart) : cart;
+  });
+}
 
-  const guestCartRes = await query(
-    `SELECT * FROM carts 
-     WHERE session_token = $1 AND expires_at > CURRENT_TIMESTAMP;`,
-    [guestSessionToken]
-  );
-
-  if (guestCartRes.rows.length === 0) return null;
-  const guestCart = guestCartRes.rows[0];
-
-  // If the guest cart already belongs to this user, nothing to do
-  if (guestCart.user_id === userId) return guestCart;
-
-  // Check if user already has an active user cart
-  const userCartRes = await query(
-    `SELECT * FROM carts 
-     WHERE user_id = $1 AND expires_at > CURRENT_TIMESTAMP 
-     ORDER BY updated_at DESC LIMIT 1;`,
-    [userId]
-  );
-
-  if (userCartRes.rows.length === 0) {
-    // User has no cart: assign guest cart directly to user
-    const updated = await query(
-      `UPDATE carts 
-       SET user_id = $1, expires_at = CURRENT_TIMESTAMP + ($2 || ' days')::INTERVAL, updated_at = CURRENT_TIMESTAMP 
-       WHERE id = $3 
-       RETURNING *;`,
-      [userId, USER_CART_EXPIRY_DAYS, guestCart.id]
-    );
-    return updated.rows[0];
-  }
-
-  // User has an existing cart: transfer guest items safely
-  const userCart = userCartRes.rows[0];
-  if (userCart.id === guestCart.id) return userCart;
-
-  const guestItemsRes = await query(
+async function mergeGuestItems(client, guestCart, userCart) {
+  const guestItemsRes = await client.query(
     `SELECT * FROM cart_items WHERE cart_id = $1;`,
     [guestCart.id]
   );
 
   for (const item of guestItemsRes.rows) {
     // Look for exact match in user cart
-    const exactMatch = await query(
+    const exactMatch = await client.query(
       `SELECT * FROM cart_items 
        WHERE cart_id = $1 
          AND product_id = $2 
@@ -580,13 +543,13 @@ async function claimGuestCart(guestSessionToken, userId) {
       // Increment quantity without exceeding limit
       const existing = exactMatch.rows[0];
       const combinedQty = Math.min(existing.quantity + item.quantity, MAX_ITEM_QUANTITY);
-      await query(
+      await client.query(
         `UPDATE cart_items SET quantity = $1 WHERE id = $2;`,
         [combinedQty, existing.id]
       );
     } else {
       // Transfer line item to user cart as distinct row
-      await query(
+      await client.query(
         `UPDATE cart_items SET cart_id = $1 WHERE id = $2;`,
         [userCart.id, item.id]
       );
@@ -594,14 +557,9 @@ async function claimGuestCart(guestSessionToken, userId) {
   }
 
   // Delete the emptied guest cart
-  await query(`DELETE FROM carts WHERE id = $1;`, [guestCart.id]);
+  await client.query(`DELETE FROM carts WHERE id = $1;`, [guestCart.id]);
 
-  await query(
-    `UPDATE carts SET updated_at = CURRENT_TIMESTAMP WHERE id = $1;`,
-    [userCart.id]
-  );
-
-  return userCart;
+  return touchCart(client, userCart.id);
 }
 
 module.exports = {
@@ -612,10 +570,11 @@ module.exports = {
   validateQuantity,
   validateSizing,
   getOrCreateCart,
-  getCartDetails,
-  addItemToCart,
-  updateCartItem,
-  removeCartItem,
-  clearCart,
+  resolveCart,
+  getCartDetails: (context) => withCart(context, readCartDetails),
+  addItemToCart: (context, item) => withCart(context, (client, cart) => addItemToCart(client, cart, item)),
+  updateCartItem: (context, id, data) => withCart(context, (client, cart) => updateCartItem(client, cart, id, data)),
+  removeCartItem: (context, id) => withCart(context, (client, cart) => removeCartItem(client, cart, id)),
+  clearCart: (context) => withCart(context, clearCart),
   claimGuestCart,
 };

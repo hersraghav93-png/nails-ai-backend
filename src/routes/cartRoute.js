@@ -18,7 +18,6 @@
 const express = require("express");
 const { optionalAuth, requireAuth } = require("../middleware/auth");
 const {
-  getOrCreateCart,
   getCartDetails,
   addItemToCart,
   updateCartItem,
@@ -46,17 +45,21 @@ function resolveSessionToken(req) {
   return null;
 }
 
+function cartContext(req) {
+  return {
+    cartId: req.body?.cart_id ?? req.query?.cart_id,
+    sessionToken: resolveSessionToken(req),
+    userId: req.user?.id || null,
+  };
+}
+
 /**
  * GET /api/cart
  * Retrieves or initializes active cart for guest or authenticated customer.
  */
 router.get("/", optionalAuth, async (req, res) => {
   try {
-    const sessionToken = resolveSessionToken(req);
-    const userId = req.user ? req.user.id : null;
-
-    const cart = await getOrCreateCart(sessionToken, userId);
-    const details = await getCartDetails(cart.id);
+    const details = await getCartDetails(cartContext(req));
 
     res.setHeader("X-Cart-Session", details.cart.sessionToken);
     return res.json({
@@ -66,8 +69,8 @@ router.get("/", optionalAuth, async (req, res) => {
   } catch (err) {
     const status = err.statusCode || 500;
     return res.status(status).json({
-      error: err.message || "Failed to retrieve cart.",
-      code: err.code || "CART_ERROR",
+      error: err.statusCode ? err.message : "Failed to retrieve cart.",
+      code: err.statusCode ? err.code : "CART_ERROR",
     });
   }
 });
@@ -78,11 +81,7 @@ router.get("/", optionalAuth, async (req, res) => {
  */
 router.post("/items", optionalAuth, async (req, res) => {
   try {
-    const sessionToken = resolveSessionToken(req);
-    const userId = req.user ? req.user.id : null;
-
-    const cart = await getOrCreateCart(sessionToken, userId);
-    const updatedDetails = await addItemToCart(cart.id, req.body || {});
+    const updatedDetails = await addItemToCart(cartContext(req), req.body || {});
 
     res.setHeader("X-Cart-Session", updatedDetails.cart.sessionToken);
     return res.status(201).json({
@@ -91,10 +90,10 @@ router.post("/items", optionalAuth, async (req, res) => {
       ...updatedDetails,
     });
   } catch (err) {
-    const status = err.statusCode || 400;
+    const status = err.statusCode || 500;
     return res.status(status).json({
-      error: err.message || "Failed to add item to cart.",
-      code: err.code || "CART_ADD_ERROR",
+      error: err.statusCode ? err.message : "Failed to add item to cart.",
+      code: err.statusCode ? err.code : "CART_ADD_ERROR",
     });
   }
 });
@@ -105,11 +104,7 @@ router.post("/items", optionalAuth, async (req, res) => {
  */
 router.put("/items/:itemId", optionalAuth, async (req, res) => {
   try {
-    const sessionToken = resolveSessionToken(req);
-    const userId = req.user ? req.user.id : null;
-
-    const cart = await getOrCreateCart(sessionToken, userId);
-    const updatedDetails = await updateCartItem(cart.id, req.params.itemId, req.body || {});
+    const updatedDetails = await updateCartItem(cartContext(req), req.params.itemId, req.body || {});
 
     res.setHeader("X-Cart-Session", updatedDetails.cart.sessionToken);
     return res.json({
@@ -118,10 +113,10 @@ router.put("/items/:itemId", optionalAuth, async (req, res) => {
       ...updatedDetails,
     });
   } catch (err) {
-    const status = err.statusCode || 400;
+    const status = err.statusCode || 500;
     return res.status(status).json({
-      error: err.message || "Failed to update cart item.",
-      code: err.code || "CART_UPDATE_ERROR",
+      error: err.statusCode ? err.message : "Failed to update cart item.",
+      code: err.statusCode ? err.code : "CART_UPDATE_ERROR",
     });
   }
 });
@@ -132,11 +127,7 @@ router.put("/items/:itemId", optionalAuth, async (req, res) => {
  */
 router.delete("/items/:itemId", optionalAuth, async (req, res) => {
   try {
-    const sessionToken = resolveSessionToken(req);
-    const userId = req.user ? req.user.id : null;
-
-    const cart = await getOrCreateCart(sessionToken, userId);
-    const updatedDetails = await removeCartItem(cart.id, req.params.itemId);
+    const updatedDetails = await removeCartItem(cartContext(req), req.params.itemId);
 
     res.setHeader("X-Cart-Session", updatedDetails.cart.sessionToken);
     return res.json({
@@ -145,10 +136,10 @@ router.delete("/items/:itemId", optionalAuth, async (req, res) => {
       ...updatedDetails,
     });
   } catch (err) {
-    const status = err.statusCode || 400;
+    const status = err.statusCode || 500;
     return res.status(status).json({
-      error: err.message || "Failed to remove item from cart.",
-      code: err.code || "CART_REMOVE_ERROR",
+      error: err.statusCode ? err.message : "Failed to remove item from cart.",
+      code: err.statusCode ? err.code : "CART_REMOVE_ERROR",
     });
   }
 });
@@ -159,11 +150,7 @@ router.delete("/items/:itemId", optionalAuth, async (req, res) => {
  */
 router.delete("/", optionalAuth, async (req, res) => {
   try {
-    const sessionToken = resolveSessionToken(req);
-    const userId = req.user ? req.user.id : null;
-
-    const cart = await getOrCreateCart(sessionToken, userId);
-    const updatedDetails = await clearCart(cart.id);
+    const updatedDetails = await clearCart(cartContext(req));
 
     res.setHeader("X-Cart-Session", updatedDetails.cart.sessionToken);
     return res.json({
@@ -174,8 +161,8 @@ router.delete("/", optionalAuth, async (req, res) => {
   } catch (err) {
     const status = err.statusCode || 500;
     return res.status(status).json({
-      error: err.message || "Failed to clear cart.",
-      code: err.code || "CART_CLEAR_ERROR",
+      error: err.statusCode ? err.message : "Failed to clear cart.",
+      code: err.statusCode ? err.code : "CART_CLEAR_ERROR",
     });
   }
 });
@@ -196,15 +183,14 @@ router.post("/claim", requireAuth, async (req, res) => {
       });
     }
 
-    const claimedCart = await claimGuestCart(guestSessionToken, req.user.id);
-    if (!claimedCart) {
+    const details = await claimGuestCart(guestSessionToken, req.user.id, { withDetails: true });
+    if (!details) {
       return res.status(404).json({
         error: "Guest cart not found or already claimed.",
         code: "GUEST_CART_NOT_FOUND",
       });
     }
 
-    const details = await getCartDetails(claimedCart.id);
     res.setHeader("X-Cart-Session", details.cart.sessionToken);
 
     return res.json({
@@ -215,8 +201,8 @@ router.post("/claim", requireAuth, async (req, res) => {
   } catch (err) {
     const status = err.statusCode || 500;
     return res.status(status).json({
-      error: err.message || "Failed to claim guest cart.",
-      code: err.code || "CART_CLAIM_ERROR",
+      error: err.statusCode ? err.message : "Failed to claim guest cart.",
+      code: err.statusCode ? err.code : "CART_CLAIM_ERROR",
     });
   }
 });
