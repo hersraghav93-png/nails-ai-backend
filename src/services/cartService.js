@@ -238,6 +238,7 @@ async function readCartDetails(client, cart) {
        ci.created_at,
        p.sku,
        p.name AS product_name,
+       p.category_id,
        p.base_price,
        p.is_available,
        p.is_archived,

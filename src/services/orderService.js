@@ -78,6 +78,20 @@ function validateAndFormatPhone(phone) {
   throw err;
 }
 
+// Accept a local number, a domestic trunk prefix, or an Indian country code.
+const CHECKOUT_MOBILE_PATTERN = /^(?:(?:\+91|0091|91|0)[ \u00a0\u202f-]?)?[6-9](?:[ \u00a0\u202f-]?\d){9}$/;
+
+function validateCheckoutPhone(phone) {
+  if (typeof phone === "string" && CHECKOUT_MOBILE_PATTERN.test(phone.trim())) {
+    return "+91" + phone.replace(/\D/g, "").slice(-10);
+  }
+
+  const err = new Error("Enter a valid 10-digit Indian mobile number, with or without +91.");
+  err.code = "INVALID_PHONE";
+  err.statusCode = 400;
+  throw err;
+}
+
 /**
  * Validates customer name and optional email.
  */
@@ -97,7 +111,7 @@ function validateCustomerDetails(customer) {
     throw err;
   }
 
-  const phone = validateAndFormatPhone(customer.phone);
+  const phone = validateCheckoutPhone(customer.phone);
 
   let email = null;
   if (customer.email && typeof customer.email === "string" && customer.email.trim()) {
@@ -133,7 +147,7 @@ function validateShippingAddress(addr) {
     throw err;
   }
 
-  const phone = validateAndFormatPhone(addr.phone);
+  const phone = validateCheckoutPhone(addr.phone);
 
   const addressLine1 = (addr.address_line1 || addr.addressLine1 || addr.line1 || "").trim();
   if (!addressLine1 || addressLine1.length < 5 || addressLine1.length > 255) {
@@ -285,6 +299,7 @@ async function createOrderFromCart({
          ci.quantity,
          p.sku,
          p.name AS product_name,
+         p.category_id,
          p.base_price,
          p.is_available,
          p.is_archived,

@@ -13,7 +13,7 @@ const assert = require("node:assert/strict");
 const root = path.resolve(__dirname, "..");
 const prefix = "nbd-checkout-test-";
 const suites = [
-  "testMigrationApproval", "testBackend", "testCheckoutOwnership", "testCommerce", "testStorefrontCustomerJourneys",
+  "testMigrationApproval", "testBackend", "testCatalogCheckoutPricing", "testCheckoutOwnership", "testCommerce", "testStorefrontCustomerJourneys",
   "testCustomerEmailAuth", "testEmailLinkDelivery", "testPaymentVerification", "testBookings", "testCommunications",
 ];
 
