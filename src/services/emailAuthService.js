@@ -29,6 +29,8 @@ const EMAIL_FORMAT_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const GENERIC_REQUEST_MESSAGE =
   "If that email address is valid, we have sent a sign-in link to your inbox. The link expires in 15 minutes.";
 
+const RESEND_COOLDOWN_SECONDS = 60;
+
 let testEmailSender = null;
 
 /**
@@ -214,11 +216,11 @@ function buildMagicLinkEmail({ loginUrl, expiresMinutes = 15 }) {
  * Dispatches transactional authentication email via Resend REST API (or test hook in NODE_ENV=test).
  * Fails closed when Resend is unconfigured in live staging/production environments.
  */
-async function sendAuthEmail({ to, subject, html, text }) {
+async function sendAuthEmail({ to, subject, html, text, attemptId }) {
   const from = CONFIG.emailAuth.resendFromEmail;
 
   if (testEmailSender && CONFIG.isTest()) {
-    return await testEmailSender({ to, from, subject, html, text });
+    return await testEmailSender({ to, from, subject, html, text, attemptId });
   }
 
   if (!CONFIG.emailAuth.isResendConfigured) {
@@ -237,6 +239,7 @@ async function sendAuthEmail({ to, subject, html, text }) {
       headers: {
         Authorization: `Bearer ${CONFIG.emailAuth.resendApiKey}`,
         "Content-Type": "application/json",
+        "Idempotency-Key": `email-login/${attemptId}`,
       },
       body: JSON.stringify({
         from,
@@ -248,24 +251,15 @@ async function sendAuthEmail({ to, subject, html, text }) {
       signal: controller.signal,
     });
 
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      console.error(`❌ [EmailAuth Resend Error] HTTP ${response.status} delivering auth email.`);
-      const err = new Error("Unable to deliver sign-in email at this time. Please try again shortly.");
-      err.code = "EMAIL_DELIVERY_FAILED";
-      err.statusCode = 502;
-      throw err;
-    }
-
-    return { id: data.id || "sent" };
-  } catch (err) {
-    if (err.name === "AbortError") {
-      const timeoutErr = new Error("Email delivery timed out. Please try again.");
-      timeoutErr.code = "EMAIL_DELIVERY_TIMEOUT";
-      timeoutErr.statusCode = 504;
-      throw timeoutErr;
-    }
-    throw err;
+    // A success status is sufficient. A lost body cannot undo provider acceptance.
+    if (response.ok) return;
+    console.warn(`[EmailAuth] Resend returned HTTP ${response.status}.`);
+    const rejected = response.status >= 400 && response.status < 500 &&
+      response.status !== 408 && response.status !== 409;
+    if (rejected) return { rejected: true };
+    return { uncertain: true };
+  } catch {
+    return { uncertain: true };
   } finally {
     clearTimeout(timeout);
   }
@@ -317,67 +311,46 @@ async function requestMagicLink({ email, origin = null, ipAddress = null, userAg
     }
   }
 
-  // 2. Per-email 15-minute issue throttle (anti-spam without disclosing existence)
-  const countRes = await query(
-    `SELECT COUNT(*)::int AS recent_count
-     FROM email_login_tokens
-     WHERE LOWER(email) = LOWER($1)
-       AND created_at > CURRENT_TIMESTAMP - INTERVAL '15 minutes';`,
-    [cleanEmail]
-  );
-
-  if ((countRes.rows[0]?.recent_count || 0) >= CONFIG.emailAuth.maxRequestsPerEmailWindow) {
-    return {
-      status: "success",
-      message: GENERIC_REQUEST_MESSAGE,
-    };
-  }
-
-  // 3. Generate cryptographically secure 256-bit single-use token and persist ONLY its SHA-256 hash
   const rawToken = crypto.randomBytes(32).toString("base64url");
-  const tokenHash = hashLoginToken(rawToken);
-  const ttlMinutes = CONFIG.emailAuth.tokenTtlMinutes || 15;
+  const ttlMinutes = CONFIG.emailAuth.tokenTtlMinutes;
+  const tokenRecordId = await withTransaction(async (client) => {
+    // Serialize issuance for this address across application instances.
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`email-link:${cleanEmail}`]);
+    const { rows: [recent] } = await client.query(
+      `SELECT COUNT(*)::int AS count,
+              COALESCE(MAX(created_at) > CURRENT_TIMESTAMP - $2 * INTERVAL '1 second', false) AS cooling_down
+       FROM email_login_tokens
+       WHERE LOWER(email) = $1 AND created_at > CURRENT_TIMESTAMP - INTERVAL '15 minutes'`,
+      [cleanEmail, RESEND_COOLDOWN_SECONDS]
+    );
+    if (recent.cooling_down || recent.count >= CONFIG.emailAuth.maxRequestsPerEmailWindow) return null;
 
-  const insertRes = await query(
-    `INSERT INTO email_login_tokens (
-       email,
-       token_hash,
-       expires_at,
-       request_ip,
-       user_agent
-     ) VALUES (
-       $1,
-       $2,
-       CURRENT_TIMESTAMP + ($3 || ' minutes')::interval,
-       $4,
-       $5
-     )
-     RETURNING id;`,
-    [
-      cleanEmail,
-      tokenHash,
-      String(ttlMinutes),
-      normalizeIp(ipAddress),
-      userAgent ? String(userAgent).slice(0, 500) : null,
-    ]
-  );
+    const { rows: [token] } = await client.query(
+      `INSERT INTO email_login_tokens (email, token_hash, expires_at, request_ip, user_agent)
+       VALUES ($1, $2, CURRENT_TIMESTAMP + $3 * INTERVAL '1 minute', $4, $5)
+       RETURNING id`,
+      [cleanEmail, hashLoginToken(rawToken), ttlMinutes, normalizeIp(ipAddress),
+        userAgent ? String(userAgent).slice(0, 500) : null]
+    );
+    return token.id;
+  });
 
-  const tokenRecordId = insertRes.rows[0].id;
-  const baseUrl = resolveSafeFrontendBaseUrl(origin);
-  const loginUrl = `${baseUrl}/account.html?email_token=${encodeURIComponent(rawToken)}`;
-  const emailTemplate = buildMagicLinkEmail({ loginUrl, expiresMinutes: ttlMinutes });
-
-  try {
-    await sendAuthEmail({
-      to: cleanEmail,
-      subject: emailTemplate.subject,
-      html: emailTemplate.html,
-      text: emailTemplate.text,
-    });
-  } catch (sendErr) {
-    // Roll back unused token if delivery failed so the user is not penalized against quota
-    await query(`DELETE FROM email_login_tokens WHERE id = $1;`, [tokenRecordId]).catch(() => {});
-    throw sendErr;
+  if (tokenRecordId) {
+    const baseUrl = resolveSafeFrontendBaseUrl(origin);
+    const loginLink = `${baseUrl}/account.html?email_token=${encodeURIComponent(rawToken)}`;
+    const emailTemplate = buildMagicLinkEmail({ loginUrl: loginLink, expiresMinutes: ttlMinutes });
+    const delivery = await sendAuthEmail({ to: cleanEmail, ...emailTemplate, attemptId: tokenRecordId });
+    if (delivery?.rejected) {
+      // Keep the issuance for throttling but disable this rejected link only.
+      await query("UPDATE email_login_tokens SET used_at = CURRENT_TIMESTAMP WHERE id = $1 AND used_at IS NULL", [tokenRecordId]);
+      const err = new Error("Unable to deliver a sign-in email. Please wait a minute before requesting another link.");
+      err.code = "EMAIL_DELIVERY_FAILED";
+      err.statusCode = 502;
+      throw err;
+    }
+    if (delivery?.uncertain) {
+      console.warn("[EmailAuth] Delivery outcome unknown. The reserved link remains valid.");
+    }
   }
 
   return {

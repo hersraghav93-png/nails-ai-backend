@@ -318,6 +318,7 @@ async function run() {
 
     await test("5. Logout & subsequent email sign-in resolves the SAME customer account without duplication", async () => {
       const beforeCount = sentEmails.length;
+      await query("UPDATE email_login_tokens SET created_at = now() - interval '61 seconds' WHERE email = $1", [guestEmail]);
       const req2 = await makeRequest(baseUrl, "POST", "/api/auth/email/request-link", {}, { email: guestEmail });
       assert.strictEqual(req2.status, 200);
       assert.strictEqual(sentEmails.length, beforeCount + 1);
@@ -381,6 +382,8 @@ async function run() {
         const r = await makeRequest(baseUrl, "POST", "/api/auth/email/request-link", {}, { email: freshEmail });
         assert.strictEqual(r.status, 200);
         assert.strictEqual(r.body.message, GENERIC_REQUEST_MESSAGE);
+        // Simulate a deliberate new request after each cooldown, within the quota window.
+        await query("UPDATE email_login_tokens SET created_at = created_at - interval '61 seconds' WHERE email = $1", [freshEmail]);
       }
       assert.strictEqual(sentEmails.length - beforeFlood, 5, "Per-email 15-min window strictly caps issued links at 5");
     });

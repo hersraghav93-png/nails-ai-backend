@@ -14,7 +14,7 @@ const root = path.resolve(__dirname, "..");
 const prefix = "nbd-checkout-test-";
 const suites = [
   "testMigrationApproval", "testBackend", "testCheckoutOwnership", "testCommerce", "testStorefrontCustomerJourneys",
-  "testCustomerEmailAuth", "testPaymentVerification", "testBookings", "testCommunications",
+  "testCustomerEmailAuth", "testEmailLinkDelivery", "testPaymentVerification", "testBookings", "testCommunications",
 ];
 
 function verifyFixture() {
