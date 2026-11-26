@@ -14,7 +14,7 @@ services:
     region: singapore
     branch: main
     buildCommand: npm install
-    startCommand: npm run migrate && npm start
+    startCommand: npm start
     healthCheckPath: /health
     autoDeploy: true
     envVars:

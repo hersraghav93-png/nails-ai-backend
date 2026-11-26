@@ -13,7 +13,7 @@ const assert = require("node:assert/strict");
 const root = path.resolve(__dirname, "..");
 const prefix = "nbd-checkout-test-";
 const suites = [
-  "testCheckoutOwnership", "testCommerce", "testStorefrontCustomerJourneys",
+  "testMigrationApproval", "testBackend", "testCheckoutOwnership", "testCommerce", "testStorefrontCustomerJourneys",
   "testCustomerEmailAuth", "testPaymentVerification", "testBookings", "testCommunications",
 ];
 
@@ -50,13 +50,14 @@ async function bootstrap(suite) {
   const { query, closePool } = require("../src/db/pool");
   const sql = name => fs.readFileSync(path.join(root, "database", name), "utf8");
   try {
+    if (suite === "testMigrationApproval") return;
     const files = [
       "migrations/001_initial_schema.sql", "seeds/001_roles_and_categories.sql",
       "seeds/002_catalog_products.sql", "migrations/002_add_firebase_uid.sql",
       "migrations/003_reconcile_service_catalog_pricing.sql", "migrations/004_add_payment_status_type_to_history.sql",
       "migrations/005_add_customer_reviews.sql", "migrations/008_customer_email_auth_tokens.sql",
     ];
-    if (suite !== suites[0]) files.push("migrations/009_checkout_attempts.sql");
+    if (suite !== "testCheckoutOwnership") files.push("migrations/009_checkout_attempts.sql");
     for (const file of files) await query(sql(file));
     if (suite === "testStorefrontCustomerJourneys") {
       await query("INSERT INTO users(email, email_verified_at) VALUES ('journey@example.invalid', now())");
@@ -81,6 +82,9 @@ async function run() {
   const data = path.join(dir, "data");
   const pw = path.join(dir, "init-password");
   const bin = process.argv[2] || "";
+  const requested = process.argv.slice(3);
+  if (requested.some(suite => !suites.includes(suite))) throw new Error("Unknown test suite");
+  const selected = requested.length ? requested : suites;
   const env = {};
   for (const name of ["PATH", "SystemRoot", "WINDIR", "ComSpec", "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL"]) {
     if (process.env[name]) env[name] = process.env[name];
@@ -101,7 +105,7 @@ async function run() {
     pg("initdb", ["-D", data, "-U", env.PGUSER, "--pwfile", pw, "-A", "scram-sha-256", "--encoding=UTF8", "--no-locale"]);
     fs.unlinkSync(pw);
     pg("pg_ctl", ["-D", data, "-l", path.join(dir, "postgres.log"), "-o", "-h 127.0.0.1 -p " + port, "-w", "start"]);
-    for (const [i, suite] of suites.entries()) {
+    for (const [i, suite] of selected.entries()) {
       env.PGDATABASE = "checkout_" + i;
       pg("createdb", ["--maintenance-db=postgres", env.PGDATABASE]);
       command(process.execPath, [__filename, "--schema", suite]);

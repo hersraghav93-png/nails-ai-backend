@@ -98,7 +98,7 @@ async function main() {
   try {
     await test("009 is outside automatic startup and applies over an existing keyless guest order", async () => {
       const manifest = require("../database/manifest.json");
-      assert.ok(!manifest.migrations.some(m => m.id === "009" || m.up_file.includes("checkout_attempts")));
+      assert.equal(manifest.migrations.find(m => m.id === "009").status, "AUTHORED_PENDING_APPROVAL");
       legacyCart = await bag();
       await add(guest(legacyCart));
       legacy = await expectStatus(place(guest(legacyCart), legacyCart), 201);

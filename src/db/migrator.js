@@ -10,7 +10,7 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const { getPool, getClient } = require("./pool");
+const { getClient } = require("./pool");
 const { sanitizeMessage, formatSafeDbError } = require("./errors");
 
 const DEFAULT_MANIFEST_PATH = path.resolve(__dirname, "../../database/manifest.json");
@@ -46,12 +46,12 @@ const REQUIRED_ANCHOR_TABLES = [
 ];
 
 /**
- * Computes uppercase SHA-256 checksum of a file or string.
+ * Computes the manifest checksum using repository (LF) line endings.
  * @param {string} content
  * @returns {string} 64-character uppercase hex hash
  */
 function computeSha256(content) {
-  return crypto.createHash("sha256").update(content, "utf8").digest("hex").toUpperCase();
+  return crypto.createHash("sha256").update(content.replace(/\r\n/g, "\n"), "utf8").digest("hex").toUpperCase();
 }
 
 /**
@@ -79,7 +79,7 @@ function loadManifest(manifestPath = DEFAULT_MANIFEST_PATH) {
  */
 async function ensureMigrationTable(client) {
   const ddl = `
-    CREATE TABLE IF NOT EXISTS schema_migrations (
+    CREATE TABLE IF NOT EXISTS public.schema_migrations (
       id VARCHAR(50) PRIMARY KEY,
       name VARCHAR(255) NOT NULL UNIQUE,
       checksum VARCHAR(64) NOT NULL,
@@ -166,82 +166,64 @@ async function checkExistingFoundation(client, expectedTableCount = 50) {
   return { state: "PARTIAL_FOUNDATION", totalTables, missingAnchors };
 }
 
-/**
- * Retrieves the current migration status by inspecting manifest.json and schema_migrations.
- * Safely auto-registers pre-existing complete foundations without re-running DDL.
- *
- * @param {object} [options]
- * @param {string} [options.manifestPath]
- * @returns {Promise<{ manifestVersion: string, migrations: Array<{ id: string, name: string, status: "APPLIED" | "PENDING", appliedAt: string | null, checksum: string, recordedChecksum: string | null, executionTimeMs: number | null }> }>}
- */
+async function readMigrationHistory(client) {
+  const result = await client.query("SELECT to_regclass('public.schema_migrations') AS ledger");
+  if (!result.rows[0].ledger) return new Map();
+
+  const history = await client.query("SELECT * FROM public.schema_migrations ORDER BY id");
+  return new Map(history.rows.map((row) => [row.name, row]));
+}
+
+async function hasExistingTable(client, migration) {
+  if (!migration.existing_table) return false;
+  const result = await client.query("SELECT to_regclass($1) IS NOT NULL AS present", [
+    `public.${migration.existing_table}`,
+  ]);
+  return result.rows[0].present;
+}
+
+/** Reports ledger and schema evidence without creating tables or recording migrations. */
 async function getMigrationStatus(options = {}) {
   const manifest = loadManifest(options.manifestPath);
   const client = await getClient();
-
   try {
-    await ensureMigrationTable(client);
-
-    const historyRes = await client.query(
-      `SELECT id, name, checksum, applied_at, execution_time_ms, manifest_version FROM schema_migrations ORDER BY id ASC;`
-    );
-    const historyMap = new Map(historyRes.rows.map((row) => [row.name, row]));
-
-    // Check if initial migration should be bootstrap-registered
-    const initialMigration = manifest.migrations.find((m) => m.id === "001" || m.name === "001_initial_schema");
-    if (initialMigration && !historyMap.has(initialMigration.name)) {
-      const foundation = await checkExistingFoundation(client, initialMigration.table_count || 50);
-
-      if (foundation.state === "COMPLETE_FOUNDATION") {
-        console.log(`ℹ️  [Migrator] Verified complete database foundation (${foundation.totalTables} tables). Bootstrap-recording ${initialMigration.name}...`);
-        await client.query("BEGIN;");
-        await client.query(
-          `INSERT INTO schema_migrations (id, name, checksum, execution_time_ms, manifest_version)
-           VALUES ($1, $2, $3, $4, $5)
-           ON CONFLICT (id) DO NOTHING;`,
-          [initialMigration.id, initialMigration.name, initialMigration.sha256, 0, manifest.version]
-        );
-        await client.query("COMMIT;");
-
-        historyMap.set(initialMigration.name, {
-          id: initialMigration.id,
-          name: initialMigration.name,
-          checksum: initialMigration.sha256,
-          applied_at: new Date().toISOString(),
-          execution_time_ms: 0,
-          manifest_version: manifest.version,
-        });
-      } else if (foundation.state === "PARTIAL_FOUNDATION") {
-        console.warn(
-          `⚠️  [Migrator Warning] Database contains ${foundation.totalTables} tables, but does not match complete foundation (missing anchors: ${foundation.missingAnchors.join(", ")}). Migration "${initialMigration.name}" will remain PENDING.`
-        );
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const history = await readMigrationHistory(client);
+    const migrations = [];
+    for (const migration of manifest.migrations) {
+      const record = history.get(migration.name);
+      let status = migration.status === "BASELINE" ? "PENDING" : "APPROVAL_REQUIRED";
+      if (record) {
+        status = "APPLIED";
+      } else if (await hasExistingTable(client, migration)) {
+        status = "PRESENT_UNRECORDED";
+      } else if (migration.id === "001") {
+        const foundation = await checkExistingFoundation(client, migration.table_count);
+        if (foundation.state === "COMPLETE_FOUNDATION") status = "PRESENT_UNRECORDED";
       }
+      migrations.push({
+        id: migration.id,
+        name: migration.name,
+        status,
+        appliedAt: record?.applied_at ?? null,
+        checksum: migration.sha256,
+        recordedChecksum: record?.checksum ?? null,
+        executionTimeMs: record?.execution_time_ms ?? null,
+        description: migration.description,
+      });
     }
-
-    const migrationsStatus = manifest.migrations.map((m) => {
-      const record = historyMap.get(m.name);
-      return {
-        id: m.id,
-        name: m.name,
-        status: record ? "APPLIED" : "PENDING",
-        appliedAt: record ? record.applied_at : null,
-        checksum: m.sha256,
-        recordedChecksum: record ? record.checksum : null,
-        executionTimeMs: record ? record.execution_time_ms : null,
-        description: m.description,
-      };
-    });
-
-    return {
-      manifestVersion: manifest.version,
-      migrations: migrationsStatus,
-    };
+    await client.query("COMMIT");
+    return { manifestVersion: manifest.version, migrations };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
   } finally {
     client.release();
   }
 }
 
 /**
- * Executes all pending migrations in strict manifest order.
+ * Applies the baseline or one explicitly named pending migration.
  * - Guarded by PostgreSQL advisory locks against concurrent execution.
  * - Each migration runs in an isolated transaction (BEGIN / COMMIT / ROLLBACK).
  * - Fails fast if any statement fails or if a checksum mismatch is detected.
@@ -256,6 +238,14 @@ async function runMigrations(options = {}) {
   const manifestPath = options.manifestPath || DEFAULT_MANIFEST_PATH;
   const manifestDir = path.dirname(manifestPath);
   const manifest = loadManifest(manifestPath);
+  const baseline = manifest.migrations.filter((m) => m.status === "BASELINE");
+  const approved = options.approve && manifest.migrations.find(
+    (m) => m.name === options.approve && m.status === "AUTHORED_PENDING_APPROVAL"
+  );
+  if (options.approve !== undefined && !approved) {
+    throw new Error("Approval must name one pending migration exactly.");
+  }
+  const selected = approved ? [approved] : baseline;
 
   const client = await getClient();
   let lockAcquired = false;
@@ -267,19 +257,20 @@ async function runMigrations(options = {}) {
     await acquireAdvisoryLock(client);
     lockAcquired = true;
 
-    // 2. Ensure migration tracking table exists
-    await ensureMigrationTable(client);
+    const historyMap = await readMigrationHistory(client);
+    if (approved && !historyMap.has(approved.name)) {
+      if (await hasExistingTable(client, approved)) {
+        throw new Error(`${approved.name} has existing schema without a ledger record. Review it before applying or recording the migration.`);
+      }
+      if (baseline.some((m) => !historyMap.has(m.name))) {
+        throw new Error("The baseline migrations must be recorded before applying a named migration.");
+      }
+    }
+    if (!approved && !selected.every((m) => historyMap.has(m.name))) {
+      await ensureMigrationTable(client);
+    }
 
-    // 3. Fetch applied migration history
-    const historyRes = await client.query(`SELECT id, name, checksum FROM schema_migrations;`);
-    const historyMap = new Map(historyRes.rows.map((r) => [r.name, r]));
-
-    // 4. Inspect existing schema evidence
-    const initialMigration = manifest.migrations.find((m) => m.id === "001" || m.name === "001_initial_schema");
-    const expectedCount = initialMigration ? initialMigration.table_count || 50 : 50;
-    const foundation = await checkExistingFoundation(client, expectedCount);
-
-    for (const migration of manifest.migrations) {
+    for (const migration of selected) {
       if (historyMap.has(migration.name)) {
         const recorded = historyMap.get(migration.name);
         if (recorded.checksum && migration.sha256 && recorded.checksum !== migration.sha256) {
@@ -293,11 +284,12 @@ async function runMigrations(options = {}) {
 
       // Check if this is the initial schema and a foundation already exists
       if (migration.name === "001_initial_schema") {
+        const foundation = await checkExistingFoundation(client, migration.table_count);
         if (foundation.state === "COMPLETE_FOUNDATION") {
           console.log(`ℹ️  [Migrator] Recognized complete foundation (${foundation.totalTables} tables). Bootstrap-recording ${migration.name} without re-running DDL.`);
           await client.query("BEGIN;");
           await client.query(
-            `INSERT INTO schema_migrations (id, name, checksum, execution_time_ms, manifest_version)
+            `INSERT INTO public.schema_migrations (id, name, checksum, execution_time_ms, manifest_version)
              VALUES ($1, $2, $3, $4, $5)
              ON CONFLICT (id) DO NOTHING;`,
             [migration.id, migration.name, migration.sha256, 0, manifest.version]
@@ -321,7 +313,7 @@ async function runMigrations(options = {}) {
         throw new Error(`Migration file not found: "${upFilePath}"`);
       }
 
-      const sqlContent = fs.readFileSync(upFilePath, "utf8");
+      const sqlContent = fs.readFileSync(upFilePath, "utf8").replace(/\r\n/g, "\n");
       const diskChecksum = computeSha256(sqlContent);
 
       // Verify file integrity against manifest
@@ -340,11 +332,13 @@ async function runMigrations(options = {}) {
       // Transactional fail-fast execution
       try {
         await client.query("BEGIN;");
-        await client.query(sqlContent);
+        // The ledger insert must commit with the SQL, including files runnable standalone.
+        const statements = sqlContent.replace(/^BEGIN;[ \t]*$/m, "").replace(/^COMMIT;\s*$/m, "");
+        await client.query(statements);
         const durationMs = Date.now() - startTime;
 
         await client.query(
-          `INSERT INTO schema_migrations (id, name, checksum, execution_time_ms, manifest_version)
+          `INSERT INTO public.schema_migrations (id, name, checksum, execution_time_ms, manifest_version)
            VALUES ($1, $2, $3, $4, $5);`,
           [migration.id, migration.name, diskChecksum, durationMs, manifest.version]
         );
@@ -364,7 +358,7 @@ async function runMigrations(options = {}) {
       success: true,
       applied,
       skipped,
-      total: manifest.migrations.length,
+      total: selected.length,
     };
   } finally {
     if (lockAcquired) {

@@ -36,7 +36,7 @@ async function verifyStaging() {
     const initialMigration = migrationStatus.migrations.find((m) => m.name === "001_initial_schema");
     assert.ok(initialMigration, "001_initial_schema migration must exist in status");
     console.log(`   Migration [001_initial_schema] Status: ${initialMigration.status}`);
-    assert.strictEqual(initialMigration.status, "APPLIED", "001_initial_schema should be recognized as APPLIED");
+    assert.ok(["APPLIED", "PRESENT_UNRECORDED"].includes(initialMigration.status), "001 foundation should be present");
     console.log(`✅ Foundation safely recognized without re-executing initial DDL.\n`);
 
     // 3. Staging Schema & Record Count Audit

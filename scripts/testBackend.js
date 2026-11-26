@@ -76,9 +76,9 @@ async function runTestSuite() {
     assert.ok(CONFIG.database.poolMax >= 1, "poolMax should be at least 1");
   });
 
-  it("database pool configuration defaults match production safety standards", () => {
-    assert.strictEqual(CONFIG.database.port, 5432, "default port should be 5432");
-    assert.strictEqual(CONFIG.database.database, "nailsbydivya_staging", "default db should be nailsbydivya_staging");
+  it("database pool configuration honors the target and uses safe timeouts", () => {
+    assert.strictEqual(CONFIG.database.port, Number(process.env.PGPORT || 5432));
+    assert.strictEqual(CONFIG.database.database, process.env.PGDATABASE || "nailsbydivya_staging");
     assert.strictEqual(CONFIG.database.poolIdleTimeoutMs, 30000, "idle timeout should be 30000ms");
     assert.strictEqual(CONFIG.database.connectionTimeoutMs, 5000, "connection timeout should be 5000ms");
   });
