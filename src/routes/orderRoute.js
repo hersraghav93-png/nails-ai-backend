@@ -21,7 +21,6 @@ const {
   getCustomerOrders,
   cancelOrder,
 } = require("../services/orderService");
-const { getOrCreateCart } = require("../services/cartService");
 
 const router = express.Router();
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -47,14 +46,7 @@ function resolveSessionToken(req) {
  * Helper to resolve idempotency key from headers or body.
  */
 function resolveIdempotencyKey(req) {
-  const headerKey = req.headers["idempotency-key"] || req.headers["x-idempotency-key"];
-  if (headerKey && typeof headerKey === "string") {
-    return headerKey.trim();
-  }
-  if (req.body && req.body.idempotency_key) {
-    return req.body.idempotency_key.toString().trim();
-  }
-  return null;
+  return req.headers["idempotency-key"] ?? req.headers["x-idempotency-key"] ?? req.body?.idempotency_key ?? null;
 }
 
 /**
@@ -86,15 +78,9 @@ router.post("/", optionalAuth, async (req, res) => {
     const idempotencyKey = resolveIdempotencyKey(req);
     const userId = req.user ? req.user.id : null;
 
-    let cartId = req.body && req.body.cart_id;
-    if (!cartId) {
-      // Resolve cart by session token or user
-      const cart = await getOrCreateCart(sessionToken, userId);
-      cartId = cart.id;
-    }
-
     const orderResult = await createOrderFromCart({
-      cartId,
+      cartId: req.body?.cart_id,
+      retryOnly: req.body?.retry_only === true,
       sessionToken,
       userId,
       customer: req.body && req.body.customer,
@@ -113,10 +99,10 @@ router.post("/", optionalAuth, async (req, res) => {
       ...orderResult,
     });
   } catch (err) {
-    const status = err.statusCode || 400;
+    const status = err.statusCode || 500;
     return res.status(status).json({
-      error: err.message || "Failed to create order.",
-      code: err.code || "ORDER_CREATION_FAILED",
+      error: err.statusCode ? err.message : "Failed to create order.",
+      code: err.statusCode ? err.code : "ORDER_CREATION_FAILED",
     });
   }
 });

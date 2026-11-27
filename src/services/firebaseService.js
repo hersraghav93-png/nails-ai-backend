@@ -12,6 +12,8 @@ const fs = require("fs");
 const path = require("path");
 const CONFIG = require("../config");
 
+const STAGING_FIREBASE_PROJECT = "nails-by-divya-staging";
+
 let firebaseApp = null;
 let testTokenVerifier = null;
 let testAdminUserLookup = null;
@@ -33,16 +35,31 @@ function initFirebase() {
   if (firebaseApp) return firebaseApp;
 
   const fbConfig = CONFIG.firebase;
+  const isolated = CONFIG.isStaging() || CONFIG.nodeEnv.trim().toLowerCase() === "preview";
+
+  function assertIsolatedProject(projectId, clientEmail = "") {
+    if (!isolated) return;
+    if (projectId !== STAGING_FIREBASE_PROJECT ||
+        (fbConfig.projectId && fbConfig.projectId !== projectId) ||
+        clientEmail.endsWith("@nails-by-divya.iam.gserviceaccount.com") ||
+        clientEmail === "nails-by-divya@appspot.gserviceaccount.com") {
+      throw new Error(`Configure Firebase Admin credentials for the dedicated ${STAGING_FIREBASE_PROJECT} project.`);
+    }
+  }
 
   try {
     const existingApps = getApps();
     if (existingApps.length > 0) {
-      firebaseApp = existingApps[0];
+      const existing = existingApps[0];
+      assertIsolatedProject(existing.options?.projectId);
+      firebaseApp = existing;
       return firebaseApp;
     }
 
     if (fbConfig.serviceAccountJson && fbConfig.serviceAccountJson.project_id && fbConfig.serviceAccountJson.client_email && fbConfig.serviceAccountJson.private_key) {
+      assertIsolatedProject(fbConfig.serviceAccountJson.project_id, fbConfig.serviceAccountJson.client_email);
       firebaseApp = initializeApp({
+        projectId: fbConfig.serviceAccountJson.project_id,
         credential: cert(fbConfig.serviceAccountJson),
       });
       console.log(`🔥 [Firebase Admin] Initialized with FIREBASE_SERVICE_ACCOUNT_JSON for project: "${fbConfig.serviceAccountJson.project_id}"`);
@@ -53,7 +70,9 @@ function initFirebase() {
       const resolvedPath = path.resolve(process.cwd(), fbConfig.serviceAccountPath);
       if (fs.existsSync(resolvedPath)) {
         const serviceAccount = JSON.parse(fs.readFileSync(resolvedPath, "utf8"));
+        assertIsolatedProject(serviceAccount.project_id, serviceAccount.client_email);
         firebaseApp = initializeApp({
+          projectId: serviceAccount.project_id,
           credential: cert(serviceAccount),
         });
         console.log(`🔥 [Firebase Admin] Initialized with service account file from: ${resolvedPath}`);
@@ -62,7 +81,9 @@ function initFirebase() {
     }
 
     if (fbConfig.projectId && fbConfig.clientEmail && fbConfig.privateKey) {
+      assertIsolatedProject(fbConfig.projectId, fbConfig.clientEmail);
       firebaseApp = initializeApp({
+        projectId: fbConfig.projectId,
         credential: cert({
           projectId: fbConfig.projectId,
           clientEmail: fbConfig.clientEmail,
@@ -75,7 +96,7 @@ function initFirebase() {
 
     if (CONFIG.isProduction()) {
       console.error("🚨 [CRITICAL Firebase Error]: Firebase Admin credentials not configured in production!");
-    } else if (CONFIG.isStaging()) {
+    } else if (isolated) {
       console.error("🚨 [CRITICAL Firebase Error]: Firebase Admin credentials not configured in staging!");
     } else {
       console.warn("⚠️  [Firebase Warning] Firebase Admin credentials not configured. Live token verification will reject tokens until .env is configured.");

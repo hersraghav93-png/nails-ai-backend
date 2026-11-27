@@ -416,7 +416,7 @@ async function runCommerceTestSuite() {
       // Under Festive Offer: promo price is ₹599.00 (not ₹1.00)
       assert.strictEqual(item.unitPrice, 599.0);
       assert.strictEqual(item.basePrice, 1199.0);
-      assert.strictEqual(item.basePrice - item.unitPrice, 300.0);
+      assert.strictEqual(item.basePrice - item.unitPrice, 600.0);
       assert.strictEqual(item.isPromoApplied, true);
     });
 
@@ -614,8 +614,8 @@ async function runCommerceTestSuite() {
 
       // Verify in DB that only 1 order exists for this idempotency key
       const dbCheck = await query(
-        `SELECT COUNT(*)::int AS count FROM orders WHERE guest_session_token = $1;`,
-        [`idem:${testIdempotencyKey}`]
+        `SELECT COUNT(*)::int AS count FROM checkout_attempts WHERE order_id = $1;`,
+        [originalOrderId]
       );
       assert.strictEqual(dbCheck.rows[0].count, 1);
     });

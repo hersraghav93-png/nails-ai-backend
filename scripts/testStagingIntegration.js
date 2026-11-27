@@ -22,6 +22,7 @@
 
 process.env.NODE_ENV = "test";
 
+const { openDate } = require("./bookingTestDates");
 const assert = require("assert");
 const crypto = require("crypto");
 const http = require("http");
@@ -220,14 +221,12 @@ async function runStagingSmokeTests() {
     // --------------------------------------------------------------------------
     console.log("\n▶ [Test 3] Shopping Cart Lifecycle & Guest Cart Claiming");
 
-    let guestSessionToken = `staging_guest_${Date.now()}`;
     let createdCart;
 
     await it("Guest adds handcrafted set to shopping cart with custom sizing", async () => {
-      const cartRes = await getOrCreateCart(guestSessionToken, null);
-      createdCart = cartRes;
+      createdCart = await getOrCreateCart(null, null);
 
-      const priced = await addItemToCart(createdCart.id, {
+      const priced = await addItemToCart({ cartId: createdCart.id, sessionToken: createdCart.session_token }, {
         sku: "WED-005",
         quantity: 1,
         shape: "Almond",
@@ -242,10 +241,10 @@ async function runStagingSmokeTests() {
     });
 
     await it("Authenticated customer claims guest cart ownership", async () => {
-      const claimed = await claimGuestCart(guestSessionToken, customerUser.id);
+      const claimed = await claimGuestCart(createdCart.session_token, customerUser.id);
       assert.strictEqual(claimed.user_id, customerUser.id, "Cart ownership transferred to customer");
 
-      const claimedDetails = await getCartDetails(claimed.id);
+      const claimedDetails = await getCartDetails({ cartId: claimed.id, userId: customerUser.id });
       assert.strictEqual(claimedDetails.items.length, 1);
       assert.strictEqual(claimedDetails.items[0].sku, "WED-005");
     });
@@ -289,9 +288,7 @@ async function runStagingSmokeTests() {
 
     let createdBooking;
     await it("Creates at-home salon appointment request in REQUESTED status", async () => {
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 2);
-      const slotDate = tomorrow.toISOString().split("T")[0];
+      const slotDate = openDate();
 
       const addonRes = await query("SELECT id FROM service_addons WHERE service_id = 'gel_extensions' LIMIT 1;");
       const addonId = addonRes.rows[0].id;
@@ -400,8 +397,8 @@ async function runStagingSmokeTests() {
     console.log("\n▶ [Test 8] Appointment Confirmation Controls");
 
     await it("Admin can confirm appointment request, locking schedule window", async () => {
-      const startTime = new Date(Date.now() + 2 * 24 * 3600 * 1000).toISOString();
-      const endTime = new Date(Date.now() + (2 * 24 + 2) * 3600 * 1000).toISOString();
+      const startTime = openDate() + "T12:30:00+05:30";
+      const endTime = openDate() + "T14:30:00+05:30";
 
       const res = await request(`/api/admin/bookings/${createdBooking.id}/confirm`, {
         method: "PATCH",

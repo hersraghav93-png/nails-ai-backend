@@ -92,7 +92,7 @@ it("retrieves canonical pricing for Natural Nail Overlay (₹1,299 base / ₹999
 it("retrieves canonical pricing for Power Polish (₹1,199 base / ₹499 promotional)", () => {
   const context = retrieveRelevantContext("Tell me about power polish and how much it costs");
   assert.ok(context.selectedKnowledgeXml.includes("1,199") || context.selectedKnowledgeXml.includes("1199"), "Context must contain base price ₹1,199");
-  assert.ok(context.selectedKnowledgeXml.includes("499"), "Context must contain promotional price ₹499");
+  assert.match(context.selectedKnowledgeXml, /Power Polish(?: \/ Shellac)?: Base price ₹1,199 \| (?:Active promotional|Promotional) offer: ₹499/);
 });
 
 it("confirms 3D Custom Artistry requires custom quotation (no fixed price)", () => {

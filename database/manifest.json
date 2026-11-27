@@ -9,6 +9,7 @@
   "migrations": [
     {
       "id": "001",
+      "status": "BASELINE",
       "name": "001_initial_schema",
       "up_file": "migrations/001_initial_schema.sql",
       "down_file": "migrations/001_initial_schema_rollback.sql",
@@ -19,6 +20,7 @@
     },
     {
       "id": "002",
+      "status": "BASELINE",
       "name": "002_add_firebase_uid",
       "up_file": "migrations/002_add_firebase_uid.sql",
       "down_file": "migrations/002_add_firebase_uid_rollback.sql",
@@ -29,6 +31,7 @@
     },
     {
       "id": "003",
+      "status": "BASELINE",
       "name": "003_reconcile_service_catalog_pricing",
       "up_file": "migrations/003_reconcile_service_catalog_pricing.sql",
       "down_file": "migrations/003_reconcile_service_catalog_pricing_rollback.sql",
@@ -39,6 +42,7 @@
     },
     {
       "id": "004",
+      "status": "BASELINE",
       "name": "004_add_payment_status_type_to_history",
       "up_file": "migrations/004_add_payment_status_type_to_history.sql",
       "down_file": "migrations/004_add_payment_status_type_to_history_rollback.sql",
@@ -49,6 +53,7 @@
     },
     {
       "id": "005",
+      "status": "BASELINE",
       "name": "005_add_customer_reviews",
       "up_file": "migrations/005_add_customer_reviews.sql",
       "down_file": "migrations/005_add_customer_reviews_rollback.sql",
@@ -66,7 +71,40 @@
       "down_sha256": "B8C143331B735BB499FDFB09DAA5CF40E20F7CF51EEFDB026F06264CE3BEBCA0",
       "table_count": 52,
       "status": "AUTHORED_PENDING_APPROVAL",
+      "existing_table": "analytics_daily_events",
       "description": "Daily privacy-safe analytics aggregation table for 6 core events with date/name primary key; authored and reviewed; awaiting explicit user approval before database execution"
+    },
+    {
+      "id": "007",
+      "name": "007_provision_owner_raghav",
+      "up_file": "migrations/007_provision_owner_raghav.sql",
+      "down_file": "migrations/007_provision_owner_raghav_rollback.sql",
+      "sha256": "0DBAA533778DDD4F380CDF45D78308694F585C9AD02CD5CDD91B688D50E44730",
+      "down_sha256": "B6B1902F4B8CADF46E76712247CEB14ADF264FD90C9D4DE99B43DF009C44D609",
+      "status": "AUTHORED_PENDING_APPROVAL",
+      "description": "Owner provisioning requires separate approval. Prior execution cannot be inferred from role assignments."
+    },
+    {
+      "id": "008",
+      "name": "008_customer_email_auth_tokens",
+      "up_file": "migrations/008_customer_email_auth_tokens.sql",
+      "down_file": "migrations/008_customer_email_auth_tokens_rollback.sql",
+      "sha256": "1196E82D56BEE43990E229F4FD2453969618FA01EE35504C3E6309EA2AD2488A",
+      "down_sha256": "F2B5C4E387D6B17EB200F515E550BAE0FC8F654B361D78258539474176768BA9",
+      "status": "AUTHORED_PENDING_APPROVAL",
+      "existing_table": "email_login_tokens",
+      "description": "Existing installations may have applied this SQL outside the ledger."
+    },
+    {
+      "id": "009",
+      "name": "009_checkout_attempts",
+      "up_file": "migrations/009_checkout_attempts.sql",
+      "down_file": "migrations/009_checkout_attempts_rollback.sql",
+      "sha256": "81981173ABBDF24EF2FA7E0BD769DBA7C47D5DAEFE592CC883B2ADC00AF39937",
+      "down_sha256": "F1E56EEDA0D55E246718642FF21A7A40F3110F3D30DE15507BDB32D68929316E",
+      "status": "AUTHORED_PENDING_APPROVAL",
+      "existing_table": "checkout_attempts",
+      "description": "Checkout retry receipts. Apply as a separately approved release step."
     }
   ],
   "seeds": [

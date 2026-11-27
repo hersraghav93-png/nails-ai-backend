@@ -63,15 +63,17 @@ The platform uses a transactional, fail-fast migration system driven by `databas
 npm run migrate:status
 ```
 
-### Apply Pending Migrations
+Status is read-only. `PRESENT_UNRECORDED` means a table exists without ledger proof. Review the schema before reconciling the ledger.
+
+### Apply migrations
+
+`npm run migrate` applies the baseline (001–005) only. For a blank database, apply the foundation SQL and `database/seeds/001_roles_and_categories.sql` first, since later baseline migrations reference seeded roles. To authorize one pending migration on the configured database target, name it exactly:
+
 ```bash
-npm run migrate
+npm run migrate -- --approve 009_checkout_attempts
 ```
-The migrator:
-1. Verifies checksum integrity against `database/manifest.json`.
-2. Automatically detects pre-existing foundation tables (e.g. `users`, `products`, `orders`) and bootstrap-records `001_initial_schema` without re-running DDL.
-3. Applies pending migrations in atomic transactions (`BEGIN ... COMMIT`).
-4. Tracks applied migrations in `schema_migrations`.
+
+The named command requires a recorded baseline and leaves the other pending migrations untouched. It stops for review if the migration's target table already exists without a ledger record. Migration 007 changes privileged accounts and requires its own approval. Application startup uses `npm start` and performs no migrations.
 
 ---
 

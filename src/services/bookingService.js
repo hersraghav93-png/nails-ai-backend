@@ -19,6 +19,7 @@ const crypto = require("crypto");
 const { getPool, query } = require("../db/pool");
 const { validateAndFormatPhone } = require("./orderService");
 const { queueNotification } = require("./notifications/notificationService");
+const { validateRequestedDate, validateTimeSlot, validateConfirmation, scheduleError, exceptionPrefix, formatDelhiClock, timeZone } = require("./bookingSchedule");
 
 // Allowed booking status values from database check constraints
 const ALLOWED_BOOKING_STATUSES = [
@@ -31,14 +32,6 @@ const ALLOWED_BOOKING_STATUSES = [
   "DECLINED",
   "CANCELLED_BY_CUSTOMER",
   "CANCELLED_BY_ARTIST",
-];
-
-// Valid time slots commonly requested for at-home appointments
-const DEFAULT_TIME_SLOTS = [
-  "10:00 AM - 12:00 PM",
-  "12:30 PM - 02:30 PM",
-  "03:00 PM - 05:00 PM",
-  "05:30 PM - 07:30 PM",
 ];
 
 /**
@@ -54,92 +47,6 @@ function formatInetIp(ip) {
   if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(clean)) return clean;
   if (clean.includes(":")) return clean;
   return null;
-}
-
-/**
- * Validates requested appointment date. Must be YYYY-MM-DD and not in the past.
- *
- * @param {string} dateStr Date string in YYYY-MM-DD format
- * @returns {string} Normalized date string
- */
-function validateRequestedDate(dateStr) {
-  if (!dateStr || typeof dateStr !== "string") {
-    const err = new Error("Requested appointment date is required.");
-    err.code = "INVALID_DATE";
-    err.statusCode = 400;
-    throw err;
-  }
-
-  const clean = dateStr.trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
-    const err = new Error("Appointment date must be in YYYY-MM-DD format.");
-    err.code = "INVALID_DATE_FORMAT";
-    err.statusCode = 400;
-    throw err;
-  }
-
-  const [year, month, day] = clean.split("-").map(Number);
-  const parsedDate = new Date(Date.UTC(year, month - 1, day));
-
-  // Check valid Gregorian calendar date
-  if (
-    parsedDate.getUTCFullYear() !== year ||
-    parsedDate.getUTCMonth() !== month - 1 ||
-    parsedDate.getUTCDate() !== day
-  ) {
-    const err = new Error("Appointment date is an invalid calendar date.");
-    err.code = "INVALID_DATE";
-    err.statusCode = 400;
-    throw err;
-  }
-
-  // Check date is not in the past (comparison against today's start in UTC)
-  const now = new Date();
-  const todayUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-
-  if (parsedDate < todayUtc) {
-    const err = new Error("Appointment date cannot be in the past. Please select an upcoming date.");
-    err.code = "PAST_DATE_NOT_ALLOWED";
-    err.statusCode = 400;
-    throw err;
-  }
-
-  // Booking window limit: max 60 days in advance
-  const maxAdvanceDate = new Date(todayUtc);
-  maxAdvanceDate.setUTCDate(maxAdvanceDate.getUTCDate() + 60);
-
-  if (parsedDate > maxAdvanceDate) {
-    const err = new Error("Appointments cannot be requested more than 60 days in advance.");
-    err.code = "DATE_TOO_FAR_IN_ADVANCE";
-    err.statusCode = 400;
-    throw err;
-  }
-
-  return clean;
-}
-
-/**
- * Validates requested time slot string.
- * @param {string} slotStr
- * @returns {string}
- */
-function validateTimeSlot(slotStr) {
-  if (!slotStr || typeof slotStr !== "string") {
-    const err = new Error("Preferred time slot is required.");
-    err.code = "INVALID_TIME_SLOT";
-    err.statusCode = 400;
-    throw err;
-  }
-
-  const clean = slotStr.trim();
-  if (clean.length < 3 || clean.length > 50) {
-    const err = new Error("Preferred time slot must be between 3 and 50 characters.");
-    err.code = "INVALID_TIME_SLOT";
-    err.statusCode = 400;
-    throw err;
-  }
-
-  return clean;
 }
 
 /**
@@ -485,6 +392,7 @@ async function createAppointmentRequest({
     const fullServiceAddressPayload = {
       ...validatedAddress,
       service_name: service.name,
+      requested_time_zone: timeZone,
       service_id: service.id,
       selected_addons: selectedAddons,
       pricing: {
@@ -687,9 +595,12 @@ function formatBookingOutput(booking, parsedAddress = null) {
     },
     requestedDate: formatDateOnly(booking.requested_date),
     requestedTimeSlot: booking.requested_time_slot,
+    requestedTimeZone: addressObj.requested_time_zone || null,
+    studioTimeZone: timeZone,
     alternativeProposedDate: formatDateOnly(booking.alternative_proposed_date),
     alternativeProposedTimeSlot: booking.alternative_proposed_time_slot,
     rescheduleReason: booking.reschedule_reason,
+    scheduleException: Boolean(booking.reschedule_reason?.startsWith(exceptionPrefix)),
     confirmedStartTime: booking.confirmed_start_time,
     confirmedEndTime: booking.confirmed_end_time,
     bookingStatus: booking.booking_status,
@@ -1048,7 +959,7 @@ async function adminListAppointments(filters = {}) {
  * @returns {Promise<object>}
  */
 async function confirmAppointmentRequest(bookingId, confirmData, adminUser, ipAddress = null) {
-  const { confirmedStartTime, confirmedEndTime, notes } = confirmData;
+  const { confirmedStartTime, confirmedEndTime, customerAcceptedException, notes } = confirmData;
 
   const pool = getPool();
   const client = await pool.connect();
@@ -1080,8 +991,11 @@ async function confirmAppointmentRequest(bookingId, confirmData, adminUser, ipAd
       throw err;
     }
 
-    const startTime = confirmedStartTime ? new Date(confirmedStartTime) : new Date();
-    const endTime = confirmedEndTime ? new Date(confirmedEndTime) : new Date(startTime.getTime() + 2 * 3600 * 1000);
+    const { start: startTime, end: endTime, day, exception } = validateConfirmation(
+      confirmedStartTime, confirmedEndTime,
+      { ...booking, alternative_proposed_date: formatDateOnly(booking.alternative_proposed_date) },
+      customerAcceptedException
+    );
 
     await client.query(
       `UPDATE bookings 
@@ -1108,7 +1022,7 @@ async function confirmAppointmentRequest(bookingId, confirmData, adminUser, ipAd
         "CONFIRMED",
         "divya",
         adminUser.id,
-        notes || "Appointment confirmed by Divya for scheduled slot.",
+        notes || (exception ? "Customer accepted the staff schedule exception." : "Appointment confirmed by Divya for scheduled slot."),
       ]
     );
 
@@ -1132,6 +1046,7 @@ async function confirmAppointmentRequest(bookingId, confirmData, adminUser, ipAd
           previous_status: booking.booking_status,
           confirmed_start_time: startTime.toISOString(),
           confirmed_end_time: endTime.toISOString(),
+          customer_accepted_schedule_exception: exception,
           notes: notes || null,
         }),
         formatInetIp(ipAddress),
@@ -1156,8 +1071,9 @@ async function confirmAppointmentRequest(bookingId, confirmData, adminUser, ipAd
           bookingNumber: booking.booking_number,
           bookingId: booking.id,
           serviceName,
-          confirmedDate: startTime.toLocaleDateString("en-IN"),
-          confirmedSlot: `${startTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} - ${endTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+          confirmedDate: day,
+          confirmedSlot: formatDelhiClock(startTime) + " - " + formatDelhiClock(endTime),
+          scheduleException: exception,
           serviceAddress: addrStr,
         },
         idempotencyKey: `booking_${booking.id}_confirmed`,
@@ -1185,10 +1101,16 @@ async function confirmAppointmentRequest(bookingId, confirmData, adminUser, ipAd
  * @returns {Promise<object>}
  */
 async function proposeAlternativeSlot(bookingId, proposalData, adminUser, ipAddress = null) {
-  const { alternativeDate, alternativeTimeSlot, rescheduleReason, notes } = proposalData;
+  const { alternativeDate, alternativeTimeSlot, rescheduleReason, allowScheduleException, notes } = proposalData;
+  const exception = allowScheduleException === true;
+  const reason = typeof rescheduleReason === "string" ? rescheduleReason.trim() : "";
+  if (exception && !reason) {
+    throw scheduleError("EXCEPTION_REASON_REQUIRED", "Enter a customer-facing reason for the schedule exception.");
+  }
+  const storedReason = exception ? exceptionPrefix + reason : reason || "Divya is fully booked during the originally requested window.";
 
-  const validatedAltDate = validateRequestedDate(alternativeDate);
-  const validatedAltSlot = validateTimeSlot(alternativeTimeSlot);
+  const validatedAltDate = validateRequestedDate(alternativeDate, { staff: exception, exception });
+  const validatedAltSlot = validateTimeSlot(alternativeTimeSlot, { exception });
 
   const pool = getPool();
   const client = await pool.connect();
@@ -1232,7 +1154,7 @@ async function proposeAlternativeSlot(bookingId, proposalData, adminUser, ipAddr
       [
         validatedAltDate,
         validatedAltSlot,
-        rescheduleReason || "Divya is fully booked during the originally requested window.",
+        storedReason,
         bookingId,
       ]
     );
@@ -1291,7 +1213,8 @@ async function proposeAlternativeSlot(bookingId, proposalData, adminUser, ipAddr
           previous_status: booking.booking_status,
           alternative_proposed_date: validatedAltDate,
           alternative_proposed_time_slot: validatedAltSlot,
-          reschedule_reason: rescheduleReason || null,
+          reschedule_reason: storedReason,
+          schedule_exception: exception,
         }),
         formatInetIp(ipAddress),
       ]
@@ -1311,7 +1234,8 @@ async function proposeAlternativeSlot(bookingId, proposalData, adminUser, ipAddr
           bookingId: booking.id,
           proposedDate: validatedAltDate,
           proposedSlot: validatedAltSlot,
-          rescheduleReason: rescheduleReason || "Studio schedule conflict",
+          rescheduleReason: storedReason,
+          scheduleException: exception,
         },
         idempotencyKey: `booking_${booking.id}_alt_proposed_${validatedAltDate}_${validatedAltSlot}`,
       });
@@ -1456,6 +1380,9 @@ async function declineAppointmentRequest(bookingId, declineData, adminUser, ipAd
 async function updateAppointmentStatus(bookingId, updateData, adminUser, ipAddress = null) {
   const { status, notes } = updateData;
 
+  if (["CONFIRMED", "ALTERNATIVE_PROPOSED"].includes(status)) {
+    throw scheduleError("SCHEDULE_ACTION_REQUIRED", "Use the dedicated confirmation or alternative proposal action.");
+  }
   if (!status || !ALLOWED_BOOKING_STATUSES.includes(status)) {
     const err = new Error(
       `Invalid booking status '${status}'. Allowed statuses: ${ALLOWED_BOOKING_STATUSES.join(", ")}.`
@@ -1549,7 +1476,6 @@ async function updateAppointmentStatus(bookingId, updateData, adminUser, ipAddre
 
 module.exports = {
   ALLOWED_BOOKING_STATUSES,
-  DEFAULT_TIME_SLOTS,
   validateRequestedDate,
   validateTimeSlot,
   validateServiceAddress,

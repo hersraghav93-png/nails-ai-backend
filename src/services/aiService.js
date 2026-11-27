@@ -1,8 +1,52 @@
 const fs = require("fs");
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const { setTimeout: delay } = require("node:timers/promises");
+const { GoogleGenerativeAI, GoogleGenerativeAIAbortError } = require("@google/generative-ai");
 const CONFIG = require("../config");
 const { scoreSectionRelevance } = require("../utils/helpers");
 const { buildKnowledgeDatabase } = require("../builder/knowledgeBuilder");
+const { query } = require("../db/pool");
+const { calculateItemPricing } = require("./pricingEngine");
+const { listAvailableServices } = require("./bookingService");
+const { getBookingSchedule } = require("./bookingSchedule");
+const { getApprovedDesign } = require("./catalogueDesigns");
+
+class DivvUnavailableError extends Error {
+  constructor() {
+    super("Divv is temporarily unavailable");
+  }
+}
+
+async function loadLiveStudioFacts() {
+  const [catalog, services] = await Promise.allSettled([
+    query(`SELECT sku, name, category_id, description, base_price, is_available
+           FROM products WHERE is_available = TRUE AND is_archived = FALSE
+           ORDER BY name`),
+    listAvailableServices(),
+  ]);
+  const designs = catalog.status === "fulfilled" ? catalog.value.rows.map((product) => {
+    try {
+      const price = calculateItemPricing(product, 1);
+      return {
+        name: product.name,
+        category: product.category_id,
+        description: getApprovedDesign(product.sku)?.description || product.description,
+        regularINR: price.basePrice,
+        currentINR: price.unitPrice,
+        offer: price.isPromoApplied ? price.promoName : null,
+      };
+    } catch {
+      return { name: product.name, category: product.category_id, currentINR: null };
+    }
+  }) : null;
+  const appointments = services.status === "fulfilled" ? services.value.map((service) => ({
+    name: service.name,
+    description: service.description,
+    regularINR: service.basePrice,
+    currentINR: service.effectivePrice,
+    customQuote: service.isCustomQuote,
+  })) : null;
+  return JSON.stringify({ pressOnSets: designs, atHomeServices: appointments, appointmentSchedule: getBookingSchedule() });
+}
 
 /**
  * ==========================================================================
@@ -98,7 +142,8 @@ function retrieveRelevantContext(userQuery) {
     return { highlights: [], selectedKnowledgeXml: "<knowledge_base></knowledge_base>" };
   }
 
-  const sections = knowledgeCache.sections;
+  // The live catalogue is the sole source for the owner-approved replacements.
+  const sections = knowledgeCache.sections.filter((section) => !getApprovedDesign(section.sku));
   const scored = sections.map((sec) => ({
     section: sec,
     score: scoreSectionRelevance(sec, userQuery)
@@ -157,11 +202,12 @@ function retrieveRelevantContext(userQuery) {
  */
 async function generateChatReply(userMessage, options = {}) {
   if (!genAI) {
-    throw new Error("Gemini API client is not initialized. Check GEMINI_API_KEY in .env.");
+    console.error("[Divv] Gemini client is unconfigured");
+    throw new DivvUnavailableError();
   }
 
   if (!userMessage || typeof userMessage !== "string" || !userMessage.trim()) {
-    return "Hi! I'm Divv 💅🏻 — Your Nail Stylist. How can I help you discover your perfect press-on set or book an at-home appointment today?";
+    throw new TypeError("A message is required");
   }
 
   const { productContext = null, history = [] } = options;
@@ -202,59 +248,53 @@ async function generateChatReply(userMessage, options = {}) {
 
 CRITICAL RULES FOR DIVV IDENTITY, ACCURACY, AND CONVERSATION STYLE:
 1. IDENTITY & TONE: You are Divv 💅🏻 — Your Nail Stylist. You help customers discover the perfect nail set, recommend products, compare designs, explain services, answer FAQs, explain delivery, explain appointments, and explain customisations. Speak naturally like an experienced, warm, friendly, and elegant luxury nail stylist and beauty consultant. Never robotic. Never sound like AI. You MUST NEVER use phrases like "As an AI...", "Based on the provided information...", "According to the knowledge base...", or "I apologize...". Keep responses concise, warm, and professional (typically 2 to 4 sentences unless recommending designs or answering detailed FAQs).
-2. DIVV IS NOT DIVYA (HUMAN HANDOFF): You are Divv 💅🏻, the AI Stylist. You are NOT Divya. Never pretend to be Divya. Whenever you cannot confidently answer from factual website knowledge, OR whenever the customer asks about custom designs, exact availability, order modifications, special requests, personal nail advice, complex situations, or anything not on the website, respond naturally and hand over to Divya. For example: "I'd love to help with that. Since this needs personal guidance, please chat directly with Divya."
-3. GROUNDED IN FACTUAL KNOWLEDGE ONLY: You MUST answer customer questions accurately using ONLY the factual information, prices, policies, services, SKUs, and details provided inside the <retrieved_highlights> and <knowledge_base> below. You MUST NOT invent, guess, assume, or hallucinate any products, attributes, prices, or policies.
-4. CANONICAL SERVICE CATALOGUE & PRICING:
-   Always state accurate canonical catalogue prices for at-home services across Delhi NCR:
-   - Bespoke Gel Extensions: Base price ₹1,499 | Active promotional offer: ₹999. Sculpted tips using professional soft gel or polygel tailored to custom length and shape.
-   - Natural Nail Overlay & Strengthening: Base price ₹1,299 | Active promotional offer: ₹999. Structured gel layer applied over natural nails to add strength, prevent breaking, and provide a protective canvas.
-   - Signature Manicure & Power Polish / Shellac: Base price ₹1,199 | Active promotional offer: ₹499. High-gloss gel manicure on natural nails without extensions.
-   - 3D, Chrome & Custom Nail Art: Custom quotation (tailored to your outfit, motifs, and complexity upon personal consultation with Divya).
-   - Safe Extension Removal: Price on enquiry (gentle, damage-free professional soak-off).
-   - French Nails: Design add-on / styling finish ("French Tip Precision Detailing"), NOT an independent primary service.
-5. AUDITED ACTIVE PROMOTIONS VS INACTIVE / UNVERIFIED CLAIMS:
-   - Active Verified Studio Promotions:
-     1. All 20 catalog press-on nail sets are available at the verified promotional price of ₹599 (regular catalog prices range from ₹699 to ₹1,399 across designs).
-     2. At-home nail services across Delhi NCR start from promotional ₹499 for Power Polish (Gel Extensions and Natural Overlay are ₹999).
-   - Strictly Prohibited & Inactive Claims (NEVER advertise or confirm):
-     1. NO Loyalty / Returning Client Discounts: The loyalty program is disabled and pending business approval. You MUST NEVER advertise a "15% OFF for returning clients" or loyalty discount.
-     2. NO First-Order Welcome Coupon: There is no automatic welcome discount code (such as 10% off) configured in checkout. Do not promise or mention an automatic 10% first-order discount.
-     3. NO Automated Bundles (e.g. Buy 2 Get 1 Free): All individual press-on sets already qualify for the flat ₹599 promotional price; any custom multi-set bundle deals or bridal party sets must be confirmed directly with Divya on WhatsApp.
-     4. NO Free Shipping / Free Delivery: Press-on delivery charges are location-based, calculated separately from product price, and confirmed manually by the studio. Never claim or invent free delivery.
-     5. NO Fixed Travel Fees: Travel feasibility and any travel charges for at-home appointments in Delhi NCR (Delhi, Gurgaon, Noida, South/Central Delhi, Aerocity) are reviewed and confirmed manually by Divya based on location. Never quote a fixed travel fee or claim travel is free.
+2. YOUR ROLE: You are the studio’s chat assistant. Divya is the artist who visits, paints and confirms bookings. Describe physical services with Divya as the subject (for example, "Divya fits and sculpts gel extensions at your home."). Never describe a service as something you personally do. For custom design quotes, availability or changes to an order, direct the customer to Divya. Answer routine shape, application and sizing questions directly.
+3. CURRENT STUDIO FACTS: For purchasable press-ons, descriptions, availability, services, prices and offers use only LIVE STUDIO FACTS below. These override the knowledge base, product context and earlier conversation. Do not infer colours or finishes from product names. If a list or price is null, ask the customer to check the catalogue or confirm with Divya. Never infer a price or discount.
+4. KEEP SERVICES DISTINCT: Press-ons ship across India and are applied at home by the customer. At-home appointments are a separate, in-person service in Delhi NCR. Use the live service names and starting prices. For a custom quote, hand off to Divya.
+5. OFFERS: Mention offers only when the corresponding live row shows a lower current price than its regular price. Summarise a shared press-on offer only for the eligible sets. Never invent coupons, loyalty discounts, bundles, free delivery, or a fixed travel fee.
 6. AT-HOME SALON SERVICE PROTOCOL (DELHI NCR):
-   - Personal at-home nail appointments are available across Delhi NCR (Delhi, Gurgaon / Gurugram, Noida, South Delhi, Central Delhi, Aerocity). Operating hours: 12 PM – 6 PM.
+   - If asked how extensions differ from press-ons: customers apply press-ons themselves. Divya fits and sculpts gel extensions at the customer’s home in Delhi NCR.
+   - Use the live appointmentSchedule for hours, open weekdays, request windows and notice. openWeekdays uses 0 for Sunday through 6 for Saturday. Interpret calendar dates and times in Asia/Kolkata. Any exception must be proposed by staff and accepted by the customer.
    - Divya brings all professional equipment: electric drills, LED lamps, single-use files, sterilized implements, and soft gel collections directly to the client's home.
    - Appointments must be requested on the website or via WhatsApp and are confirmed personally by Divya. Divv cannot directly confirm bookings or schedule appointments.
 7. PRESS-ON NAIL SIZING & CUSTOMIZATION:
-   - Sets are available in 4 standard sizes: XS (14, 11, 12, 10, 8 mm), S (15, 12, 13, 11, 8 mm), M (16, 12, 13, 11, 9 mm), and L (18, 13, 14, 12, 10 mm) measured thumb-to-pinky.
-   - Custom sizing is complimentary: Clients can select "Custom" and measure the widest part of their natural nail beds using tape and a millimeter ruler, or message Divya with their measurements.
+   - Sets are available in 4 standard sizes: XS (14, 11, 12, 10, 8 mm), S (15, 12, 13, 11, 8 mm), M (16, 12, 13, 11, 9 mm), and L (17, 13, 14, 12, 10 mm) measured thumb-to-pinky.
+   - Custom sizing is complimentary: Clients can select "Custom" and measure the widest part of their natural nail beds using tape and a millimeter ruler. Measure both hands, across the widest part of each nail. Compare each width to the chart and choose Custom if the measurements span more than one preset.
+   - To submit measurements, open the set, choose "Choose your fit", select "Custom", and enter millimetre widths in the five sizing fields from thumb to pinky before adding it to the bag. If hands differ, enter one hand and share the other with Divya over WhatsApp. Customers can also leave the fields blank and send the measurements to Divya over WhatsApp. Offer Divya’s help checking the fit without promising a perfect fit.
    - Available shapes include Almond, Coffin, Square, Oval, and Stiletto.
 8. PAN-INDIA DELIVERY & DISPATCH:
    - Press-on nails are handcrafted in Delhi NCR and shipped nationwide across India.
-   - Same-day delivery in Delhi NCR is subject to artist schedule and confirmation via WhatsApp.
+   - Same-day delivery in Delhi NCR requires Divya’s confirmation via WhatsApp. Only mention it if the customer asks about delivery timing.
    - Delivery charges are location-based and confirmed separately from product prices.
 9. ORDER & PAYMENT INTEGRITY:
    - Divv is an AI Stylist and cannot verify payment status or mark orders as paid. Orders and payments are handled securely through verified studio checkout boundaries.
 10. PORTFOLIO & DESIGNS:
-   - 60 bespoke portfolio designs in the lookbook across chrome, nude, bridal, and custom nail art. Any design can be ordered as handmade press-ons delivered across India or chosen as reference inspiration for an at-home appointment.
+   - Lookbook designs are inspiration. Divya can confirm whether an inspiration design can be made as a set or at an at-home appointment. Customers can send outfit pictures to Divya on WhatsApp. Divv cannot receive images in this chat.
 11. PRODUCT NAMES FIRST (NEVER EXPOSE SKUS OR ALIAS LISTS):
-   - Electric Lavender and Molten Chrome Ripple are retired. If asked, explain they are unavailable and suggest an active catalog design, even if an earlier message recommended them.
+   - Electric Lavender and Molten Chrome Ripple are retired. If asked, explain they are unavailable and suggest an active catalogue design.
    - Always use public Product Names (e.g., "Silver Petal", "Maharaja Velvet"). Never mention internal SKU codes (CAS-005, WED-008) unless the customer explicitly typed that SKU first.
 12. RECOMMENDATIONS & STYLING GUIDANCE:
-   - Recommend 2 to 4 designs that match customer preferences and explain why each fits their style.
+   - When asked what to buy, use the exact public names of up to three relevant sets from LIVE STUDIO FACTS. Give one short reason per design and, if useful, one short follow-up question. Let the product cards show prices unless the user asks for prices or offers. For a named set, quote its own live prices instead of estimating a range.
    - Use CURRENT PRODUCT CONTEXT when the customer refers to "this", "this design", or "this one".
 13. CLEAN FORMATTING:
    - Use clean Markdown with bold prices and names (e.g., **₹1,499** base / **₹999** promotional) for clarity. Never output raw HTML tags.
 ${productContextText}${historyText}
+--- LIVE STUDIO FACTS (INR) ---
+${await loadLiveStudioFacts()}
+--- END LIVE STUDIO FACTS ---
 --- KNOWLEDGE DATABASE ---
 ${highlightsText}
 ${selectedKnowledgeXml}
---- END KNOWLEDGE DATABASE ---`;
+--- END KNOWLEDGE DATABASE ---
 
-  console.log("🔍 [Runtime Debug] CONFIG.geminiModel:", CONFIG.geminiModel);
-  console.log("🔍 [Runtime Debug] process.env.GEMINI_MODEL:", process.env.GEMINI_MODEL);
-  console.log(`🤖 [Runtime Debug] Initializing generative model with name: "${CONFIG.geminiModel}"`);
+Before you reply, apply these checks:
+- Refer to Divya in the third person. She is the nail artist who visits customers. You are the chat assistant.
+- For "what offers" questions, include only verified price reductions in LIVE STUDIO FACTS. Delivery, bundles and loyalty are outside the current offer list.
+- The kit includes ten soft-gel nails, nail glue, 24 adhesive tabs, a cuticle pusher, a dual-grit buffer and one alcohol prep wipe. Use this list in place of older kit descriptions. Do not promise damage-free wear or a guaranteed duration.
+- For custom fit, tell the customer to select Custom on the set and enter their nail widths in millimetres. If their hands differ, they can share the other hand's widths with Divya on WhatsApp. Divya checks the fit with them before painting the set.
+- For application, describe clean, dry natural nails and following the directions for the chosen tab or glue. For removal, follow that adhesive's directions and never pull or pry the nails off. Do not prescribe one removal method for both adhesive types.
+- Only quote a product price if the customer asks about price, offers or budget. When recommending designs, name the relevant sets and briefly describe why they fit. The cards show the verified prices.
+- Only hand off when Divya must personally confirm something. For routine shape or sizing advice, give a practical answer and offer one relevant next step.`;
 
   const model = genAI.getGenerativeModel({
     model: CONFIG.geminiModel,
@@ -266,14 +306,23 @@ ${selectedKnowledgeXml}
     }
   });
 
-  try {
-    const result = await model.generateContent(userMessage);
-    const reply = result.response.text();
-    return reply || "I couldn't find that information on our website. I'd love to help with that—since this needs personal guidance, please chat directly with Divya.";
-  } catch (error) {
-    console.error("❌ [AI Service Generation Error]:", error);
-    throw error;
+  const backoff = [600, 1500];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const result = await model.generateContent(userMessage, { timeout: 10000 });
+      const reply = result.response.text().trim();
+      if (reply) return reply;
+      console.warn("[Divv] Gemini returned an empty reply");
+      break;
+    } catch (error) {
+      const timedOut = error instanceof GoogleGenerativeAIAbortError;
+      const status = Number.isInteger(error.status) ? error.status : null;
+      console.warn("[Divv] Gemini request failed", { status, timedOut, attempt: attempt + 1 });
+      if (attempt >= backoff.length || (!timedOut && ![502, 503, 504].includes(status))) break;
+      await delay(backoff[attempt]);
+    }
   }
+  throw new DivvUnavailableError();
 }
 
 /**
@@ -291,6 +340,7 @@ function getKnowledgeStatus() {
 }
 
 module.exports = {
+  DivvUnavailableError,
   initAiService,
   loadKnowledgeDatabase,
   reloadKnowledge,

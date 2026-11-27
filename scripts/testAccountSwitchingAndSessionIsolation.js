@@ -7,8 +7,8 @@
  *
  * Explicitly tests:
  * 1. Rapid, sequential switching between OWNER, CUSTOMER, and ARTIST accounts
- *    simulating real browser usage.
- * 2. Complete clearance of privilege upon logout (stale tokens / role bleeding).
+ *    using independent mock bearer identities. Browser logout is covered separately by the storefront suite.
+ * 2. Absence of role carry-over after changing the bearer identity.
  * 3. Rejection of customer from all administrative endpoints.
  * 4. Rejection of artist from owner-only endpoints (staff, settings, audit-logs).
  * 5. Anti-takeover conflict defense (409) when foreign UID claims registered phones.
@@ -18,12 +18,12 @@
 
 "use strict";
 
-process.env.NODE_ENV = "test";
+require("./withDisposableCheckoutDb").verifyFixture();
 
 const assert = require("assert");
 const http = require("http");
 const express = require("express");
-const { getPool, query, withTransaction, closePool } = require("../src/db/pool");
+const { query, closePool } = require("../src/db/pool");
 const { setTestTokenVerifier, clearTestTokenVerifier } = require("../src/services/firebaseService");
 const authRouter = require("../src/routes/authRoute");
 const adminRouter = require("../src/routes/adminRoute");
@@ -45,7 +45,7 @@ async function run() {
   app.use("/api", bookingRouter);
 
   const server = http.createServer(app);
-  await new Promise((resolve) => server.listen(0, resolve));
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = server.address().port;
   const baseUrl = `http://127.0.0.1:${port}`;
 
@@ -79,22 +79,22 @@ async function run() {
 
   const ts = Date.now();
   const owner = {
-    phone: "+917827437985",
+    phone: "+919000000071",
     uid: `owner_uid_${ts}`,
     token: `token_owner_${ts}`,
-    displayName: "Raghav"
+    displayName: "Fixture owner"
   };
   const customer = {
-    phone: `+919815${String(ts).slice(-6)}`,
+    phone: "+919000000073",
     uid: `cust_switch_uid_${ts}`,
     token: `token_cust_switch_${ts}`,
     displayName: "Customer"
   };
   const artist = {
-    phone: "+918447391310",
+    phone: "+919000000072",
     uid: `artist_uid_${ts}`,
     token: `token_artist_${ts}`,
-    displayName: "Divya"
+    displayName: "Fixture artist"
   };
 
   // Configure Mock Verifier
@@ -116,10 +116,14 @@ async function run() {
     throw err;
   });
 
-  // Ensure clean starting state for Divya and Raghav
-  await query("UPDATE users SET firebase_uid = NULL WHERE phone IN ($1, $2);", [owner.phone, artist.phone]);
-
   try {
+    // Role definitions come from the seed. Attach them to synthetic identities
+    // in this disposable database so the test never needs the real owner seed.
+    for (const [person, role] of [[owner, "super_operator"], [artist, "artist_divya"]]) {
+      const { rows: [user] } = await query("INSERT INTO users (phone) VALUES ($1) RETURNING id", [person.phone]);
+      await query("INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)", [user.id, role]);
+      await query("INSERT INTO admin_profiles (user_id, display_name) VALUES ($1, $2)", [user.id, person.displayName]);
+    }
     // -------------------------------------------------------------------------
     // STEP 1: INITIAL STATE (NO SESSION)
     // -------------------------------------------------------------------------
@@ -130,16 +134,16 @@ async function run() {
     console.log("  ✓ Passed: Unauthenticated request rejected with 401 AUTH_REQUIRED");
 
     // -------------------------------------------------------------------------
-    // STEP 2: LOGIN AS OWNER (RAGHAV)
+    // STEP 2: LOGIN AS FIXTURE OWNER
     // -------------------------------------------------------------------------
-    console.log("\n▶ STEP 2: Authenticate as OWNER (Raghav, +917827437985)");
+    console.log("\n▶ STEP 2: Authenticate as fixture owner");
     const resOwnerLogin = await request("/api/auth/verify-phone", {
       method: "POST",
       body: { idToken: owner.token }
     });
     assert.strictEqual(resOwnerLogin.status, 200);
     assert.ok(resOwnerLogin.body.user.roles.includes("super_operator"), "Owner must hold super_operator role");
-    assert.strictEqual(resOwnerLogin.body.user.adminProfile.display_name, "Raghav");
+    assert.strictEqual(resOwnerLogin.body.user.adminProfile.display_name, owner.displayName);
 
     // Verify Owner has access to staff, settings, audit-logs
     const resOwnerStaff = await request("/api/admin/staff", { headers: { Authorization: `Bearer ${owner.token}` } });
@@ -153,10 +157,10 @@ async function run() {
     console.log("  ✓ Passed: Owner authenticated with universal permissions on staff, settings, audit-logs");
 
     // -------------------------------------------------------------------------
-    // STEP 3: SWITCH TO CUSTOMER IN SAME CLIENT BROWSER
+    // STEP 3: SWITCH TO CUSTOMER
     // -------------------------------------------------------------------------
-    console.log("\n▶ STEP 3: Switch to CUSTOMER (Aanya, " + customer.phone + ") in Same Browser");
-    // Simulate client-side logout: Owner token discarded. New token obtained for customer.
+    console.log("\n▶ STEP 3: Switch to fixture customer");
+    // Send the next request with a different, unprivileged identity.
     const resCustLogin = await request("/api/auth/verify-phone", {
       method: "POST",
       body: { idToken: customer.token }
@@ -188,9 +192,9 @@ async function run() {
     console.log("  ✓ Passed: Customer strictly forbidden from all admin routes (403 FORBIDDEN_ROLE). Zero role bleeding.");
 
     // -------------------------------------------------------------------------
-    // STEP 4: SWITCH TO ARTIST (DIVYA, +918447391310) IN SAME BROWSER
+    // STEP 4: SWITCH TO FIXTURE ARTIST
     // -------------------------------------------------------------------------
-    console.log("\n▶ STEP 4: Switch to ARTIST (Divya, +918447391310) in Same Browser");
+    console.log("\n▶ STEP 4: Switch to fixture artist");
     const resArtistLogin = await request("/api/auth/verify-phone", {
       method: "POST",
       body: { idToken: artist.token }
@@ -236,9 +240,9 @@ async function run() {
     console.log("  ✓ Passed: Anti-takeover conflict check rejected foreign UID binding with 409 ACCOUNT_LINK_CONFLICT");
 
     // -------------------------------------------------------------------------
-    // STEP 6: SWITCH BACK TO OWNER (RAGHAV)
+    // STEP 6: SWITCH BACK TO FIXTURE OWNER
     // -------------------------------------------------------------------------
-    console.log("\n▶ STEP 6: Switch Back to OWNER (Raghav) in Same Browser");
+    console.log("\n▶ STEP 6: Switch back to fixture owner");
     const resOwnerReLogin = await request("/api/auth/verify-phone", {
       method: "POST",
       body: { idToken: owner.token }
@@ -254,13 +258,7 @@ async function run() {
     console.log("  ✓ Passed: Owner re-authenticated with full privileges cleanly restored.");
 
     // -------------------------------------------------------------------------
-    // CLEANUP
-    // -------------------------------------------------------------------------
-    console.log("\n▶ PRISTINE DATABASE CLEANUP");
-    await query("UPDATE users SET firebase_uid = NULL WHERE phone IN ($1, $2);", [owner.phone, artist.phone]);
-    await query("DELETE FROM users WHERE phone = $1;", [customer.phone]);
-    console.log("  ✓ Cleaned up test customer and reset admin UIDs to NULL");
-
+    // The fixture database is isolated per suite.
     console.log("\n==================================================================");
     console.log("🎉 ALL ACCOUNT SWITCHING & SESSION ISOLATION TESTS PASSED!");
     console.log("==================================================================\n");

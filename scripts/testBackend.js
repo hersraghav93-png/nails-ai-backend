@@ -76,9 +76,9 @@ async function runTestSuite() {
     assert.ok(CONFIG.database.poolMax >= 1, "poolMax should be at least 1");
   });
 
-  it("database pool configuration defaults match production safety standards", () => {
-    assert.strictEqual(CONFIG.database.port, 5432, "default port should be 5432");
-    assert.strictEqual(CONFIG.database.database, "nailsbydivya_staging", "default db should be nailsbydivya_staging");
+  it("database pool configuration honors the target and uses safe timeouts", () => {
+    assert.strictEqual(CONFIG.database.port, Number(process.env.PGPORT || 5432));
+    assert.strictEqual(CONFIG.database.database, process.env.PGDATABASE || "nailsbydivya_staging");
     assert.strictEqual(CONFIG.database.poolIdleTimeoutMs, 30000, "idle timeout should be 30000ms");
     assert.strictEqual(CONFIG.database.connectionTimeoutMs, 5000, "connection timeout should be 5000ms");
   });
@@ -377,7 +377,7 @@ async function runTestSuite() {
       assert.ok(res.body.error.includes("'message' string is required"));
     });
 
-    await itAsync("POST /chat contract succeeds and returns structured { reply }", async () => {
+    await itAsync("POST /chat returns a real reply or a sanitized unavailability response", async () => {
       const res = await makeRequest("/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -386,11 +386,12 @@ async function runTestSuite() {
           history: [],
         },
       });
-      // In development without GEMINI_API_KEY, fallback handler responds
-      assert.ok(res.status === 200 || res.status === 500);
+      assert.ok([200, 503].includes(res.status));
       if (res.status === 200) {
         assert.ok(typeof res.body.reply === "string", "reply must be a string");
         assert.ok(res.body.reply.length > 0, "reply must not be empty");
+      } else {
+        assert.deepEqual(res.body, { error: "Divv is temporarily unavailable. Please try again." });
       }
     });
 

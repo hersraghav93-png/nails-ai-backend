@@ -14,7 +14,7 @@ services:
     region: singapore
     branch: feature/phase-4a-staging-integration
     buildCommand: npm install
-    startCommand: npm run migrate && npm start
+    startCommand: npm start
     healthCheckPath: /health
     autoDeploy: false
     domains:

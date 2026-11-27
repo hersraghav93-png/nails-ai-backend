@@ -26,6 +26,7 @@
 process.env.NODE_ENV = "test";
 
 const http = require("http");
+const { openDate } = require("./bookingTestDates");
 const assert = require("assert");
 const crypto = require("crypto");
 const app = require("../index");
@@ -178,14 +179,8 @@ async function runBookingTestSuite() {
   });
 
   // Calculate dynamic future dates
-  const now = new Date();
-  const d1 = new Date(now);
-  d1.setUTCDate(d1.getUTCDate() + 3);
-  const futureDate1 = d1.toISOString().slice(0, 10);
-
-  const d2 = new Date(now);
-  d2.setUTCDate(d2.getUTCDate() + 5);
-  const futureDate2 = d2.toISOString().slice(0, 10);
+  const futureDate1 = openDate(3);
+  const futureDate2 = openDate(5);
 
   let guestBookingId = null;
   let guestClaimSecret = null;
@@ -296,7 +291,7 @@ async function runBookingTestSuite() {
             postal_code: "122002",
           },
           requested_date: futureDate1,
-          requested_time_slot: "02:00 PM - 04:00 PM",
+          requested_time_slot: "12:30 PM - 02:30 PM",
           customer_notes: "Prefer oval almond shape; bridal engagement ceremony upcoming.",
           reference_image_url: "https://example.com/bridal_inspo.jpg",
         },
@@ -310,7 +305,7 @@ async function runBookingTestSuite() {
       assert.strictEqual(res.body.booking.estimatedTotal, 999.0);
       assert.strictEqual(res.body.booking.customerName, "Radhika Mehra");
       assert.strictEqual(res.body.booking.requestedDate, futureDate1);
-      assert.strictEqual(res.body.booking.requestedTimeSlot, "02:00 PM - 04:00 PM");
+      assert.strictEqual(res.body.booking.requestedTimeSlot, "12:30 PM - 02:30 PM");
       assert.strictEqual(res.body.booking.serviceAddress.postalCode, "122002");
       assert.ok(res.body.claimSecret); // Guest claim secret returned
 
@@ -341,7 +336,7 @@ async function runBookingTestSuite() {
             postal_code: "110057",
           },
           requested_date: futureDate2,
-          requested_time_slot: "10:00 AM - 12:00 PM",
+          requested_time_slot: "12:30 PM - 02:30 PM",
         },
       });
 
@@ -371,7 +366,7 @@ async function runBookingTestSuite() {
             postal_code: "110001",
           },
           requested_date: futureDate1,
-          requested_time_slot: "10:00 AM - 12:00 PM",
+          requested_time_slot: "12:30 PM - 02:30 PM",
         },
       });
 
@@ -392,7 +387,7 @@ async function runBookingTestSuite() {
             postal_code: "110001",
           },
           requested_date: "2020-01-15", // Past date
-          requested_time_slot: "10:00 AM - 12:00 PM",
+          requested_time_slot: "12:30 PM - 02:30 PM",
         },
       });
 
@@ -413,7 +408,7 @@ async function runBookingTestSuite() {
             postal_code: "110001",
           },
           requested_date: "2026-02-31", // Nonexistent date
-          requested_time_slot: "10:00 AM - 12:00 PM",
+          requested_time_slot: "12:30 PM - 02:30 PM",
         },
       });
 
@@ -434,7 +429,7 @@ async function runBookingTestSuite() {
             postal_code: "010001", // Invalid leading zero in Indian PIN
           },
           requested_date: futureDate1,
-          requested_time_slot: "10:00 AM - 12:00 PM",
+          requested_time_slot: "12:30 PM - 02:30 PM",
         },
       });
 
@@ -538,7 +533,7 @@ async function runBookingTestSuite() {
             postal_code: "201301",
           },
           requested_date: futureDate1,
-          requested_time_slot: "11:00 AM - 01:00 PM",
+          requested_time_slot: "12:30 PM - 02:30 PM",
         },
       });
 
@@ -560,7 +555,7 @@ async function runBookingTestSuite() {
             postal_code: "201301",
           },
           requested_date: futureDate1,
-          requested_time_slot: "11:00 AM - 01:00 PM",
+          requested_time_slot: "12:30 PM - 02:30 PM",
         },
       });
 
@@ -625,13 +620,37 @@ async function runBookingTestSuite() {
       assert.ok(res.body.total >= 2);
     });
 
+    await itAsync("Staff schedule proposals require permission, an explicit exception and a customer-facing reason", async () => {
+      const endpoint = "/api/admin/bookings/" + guestBookingId + "/propose-slot";
+      const offer = { alternative_date: futureDate2, alternative_time_slot: "10:00 - 11:00" };
+      const propose = (role, body) => makeRequest(endpoint, {
+        method: "PATCH", headers: { Authorization: "Bearer token_" + role }, body,
+      });
+      assert.equal((await propose("cust_a", { ...offer, allow_schedule_exception: true })).status, 403);
+      assert.equal((await propose("admin", offer)).body.code, "INVALID_TIME_SLOT");
+      const delhiToday = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Kolkata" }).format(new Date());
+      assert.equal((await propose("admin", {
+        alternative_date: delhiToday, alternative_time_slot: "12:30 PM - 02:30 PM",
+      })).body.code, "MINIMUM_NOTICE_REQUIRED");
+      assert.equal((await propose("admin", { ...offer, allow_schedule_exception: true })).body.code, "EXCEPTION_REASON_REQUIRED");
+      const proposal = await propose("admin", { ...offer, allow_schedule_exception: true, reschedule_reason: "Fixture exception" });
+      assert.equal(proposal.status, 200);
+      assert.equal(proposal.body.booking.scheduleException, true);
+      assert.match(proposal.body.booking.rescheduleReason, /Staff schedule exception/);
+      const confirmation = await makeRequest("/api/admin/bookings/" + guestBookingId + "/confirm", {
+        method: "PATCH", headers: { Authorization: "Bearer token_admin" },
+        body: { confirmed_start_time: futureDate2 + "T10:00:00+05:30", confirmed_end_time: futureDate2 + "T11:00:00+05:30" },
+      });
+      assert.equal(confirmation.body.code, "EXCEPTION_REQUIRES_ACCEPTANCE");
+    });
+
     await itAsync("Admin can propose an alternative slot and generate an action token", async () => {
       const res = await makeRequest(`/api/admin/bookings/${guestBookingId}/propose-slot`, {
         method: "PATCH",
         headers: { Authorization: "Bearer token_admin" },
         body: {
           alternative_date: futureDate2,
-          alternative_time_slot: "04:30 PM - 06:30 PM",
+          alternative_time_slot: "03:00 PM - 05:00 PM",
           reschedule_reason: "Divya is attending a bridal suite appointment during earlier window.",
         },
       });
@@ -639,13 +658,13 @@ async function runBookingTestSuite() {
       assert.strictEqual(res.status, 200);
       assert.strictEqual(res.body.booking.bookingStatus, "ALTERNATIVE_PROPOSED");
       assert.strictEqual(res.body.booking.alternativeProposedDate, futureDate2);
-      assert.strictEqual(res.body.booking.alternativeProposedTimeSlot, "04:30 PM - 06:30 PM");
+      assert.strictEqual(res.body.booking.alternativeProposedTimeSlot, "03:00 PM - 05:00 PM");
       assert.ok(res.body.actionToken); // Action token generated for customer response
     });
 
     await itAsync("Admin can confirm an appointment and set scheduled times", async () => {
-      const startTime = new Date(Date.now() + 4 * 24 * 3600 * 1000).toISOString();
-      const endTime = new Date(Date.now() + (4 * 24 + 2) * 3600 * 1000).toISOString();
+      const startTime = futureDate2 + "T15:00:00+05:30";
+      const endTime = futureDate2 + "T17:00:00+05:30";
 
       const res = await makeRequest(`/api/admin/bookings/${guestBookingId}/confirm`, {
         method: "PATCH",
@@ -717,7 +736,7 @@ async function runBookingTestSuite() {
             postal_code: "110001",
           },
           requested_date: futureDate1,
-          requested_time_slot: "10:00 AM - 12:00 PM",
+          requested_time_slot: "12:30 PM - 02:30 PM",
         },
       });
 

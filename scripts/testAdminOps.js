@@ -19,6 +19,7 @@
 
 process.env.NODE_ENV = "test";
 
+const { openDate } = require("./bookingTestDates");
 const assert = require("assert");
 const http = require("http");
 const app = require("../index");
@@ -430,7 +431,7 @@ async function runAdminOpsTestSuite() {
     });
 
     await itAsync("Admin can propose an alternative slot with action token", async () => {
-      const altDate = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+      const altDate = openDate(7);
       const res = await makeRequest(`/api/admin/bookings/${sampleBookingId}/propose-slot`, {
         method: "PATCH",
         headers: { Authorization: "Bearer token_divya" },
@@ -446,8 +447,8 @@ async function runAdminOpsTestSuite() {
     });
 
     await itAsync("Admin can confirm appointment with locked scheduled time window", async () => {
-      const startTime = new Date(Date.now() + 8 * 24 * 3600 * 1000).toISOString();
-      const endTime = new Date(Date.now() + (8 * 24 + 2) * 3600 * 1000).toISOString();
+      const startTime = openDate(7) + "T15:00:00+05:30";
+      const endTime = openDate(7) + "T17:00:00+05:30";
 
       const res = await makeRequest(`/api/admin/bookings/${sampleBookingId}/confirm`, {
         method: "PATCH",
