@@ -26,6 +26,8 @@ const {
   cancelAppointmentRequest,
 } = require("../services/bookingService");
 
+const { getBookingSchedule } = require("../services/bookingSchedule");
+
 const router = express.Router();
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -107,10 +109,12 @@ function resolveClaimSecret(req) {
 router.get("/services", async (req, res) => {
   try {
     const services = await listAvailableServices();
+    res.set("Cache-Control", "no-store");
     return res.json({
       status: "success",
       count: services.length,
       services,
+      schedule: getBookingSchedule(),
     });
   } catch (err) {
     return res.status(500).json({

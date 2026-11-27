@@ -13,6 +13,8 @@
 
 "use strict";
 
+const { getApprovedDesign } = require("./catalogueDesigns");
+
 const crypto = require("crypto");
 const { withTransaction } = require("../db/pool");
 const { calculateItemPricing, calculateCartTotals } = require("./pricingEngine");
@@ -262,7 +264,7 @@ async function readCartDetails(client, cart) {
       productId: row.product_id,
       sku: row.sku,
       productName: row.product_name,
-      heroImageUrl: row.hero_image_url,
+      heroImageUrl: getApprovedDesign(row.sku)?.imageUrl || row.hero_image_url,
       shape: row.shape,
       length: row.length,
       sizingPreset: row.sizing_preset,

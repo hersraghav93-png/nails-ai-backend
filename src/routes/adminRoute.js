@@ -394,6 +394,7 @@ async function handleConfirmBooking(req, res) {
       {
         confirmedStartTime: req.body && req.body.confirmed_start_time,
         confirmedEndTime: req.body && req.body.confirmed_end_time,
+        customerAcceptedException: req.body && req.body.customer_accepted_schedule_exception,
         notes: req.body && req.body.notes,
       },
       req.user,
@@ -430,6 +431,7 @@ async function handleProposeSlot(req, res) {
         alternativeDate: req.body && (req.body.alternative_date || req.body.alternative_proposed_date),
         alternativeTimeSlot: req.body && (req.body.alternative_time_slot || req.body.alternative_proposed_time_slot),
         rescheduleReason: req.body && req.body.reschedule_reason,
+        allowScheduleException: req.body && req.body.allow_schedule_exception,
         notes: req.body && req.body.notes,
       },
       req.user,

@@ -9,6 +9,14 @@ const { query, closePool } = require("../src/db/pool");
 const app = require("../index");
 
 const seasonalPrice = 599;
+const approvedPhotos = {
+  "CAS-004": "assets/portfolio/nvm8.png",
+  "PAR-008": "assets/studio/ruby-540.webp",
+  "PAR-009": "assets/portfolio/newnail2.png",
+  "WED-001": "assets/portfolio/nail6.png",
+  "WED-002": "assets/portfolio/dv1.jpeg",
+  "WED-007": "assets/portfolio/port61.jpeg",
+};
 const basePrices = {
   "CAS-004": 899, "CAS-005": 799, "CAS-007": 1199, "CAS-008": 1199,
   "PAR-003": 1299, "PAR-004": 1299, "PAR-008": 999, "PAR-009": 1199, "PAR-0010": 1299, "PAR-0011": 799,
@@ -57,6 +65,12 @@ async function main() {
         assert.equal(listing.effectivePrice, seasonalPrice, sku);
         assert.equal(listing.isPromoApplied, true, sku);
       }
+      if (approvedPhotos[sku]) {
+        assert.equal(product.name, detail.name);
+        assert.equal(product.description, detail.description);
+        assert.equal(product.primaryImageUrl, approvedPhotos[sku]);
+        assert.deepEqual(detail.images.map(({ imageUrl }) => imageUrl), [approvedPhotos[sku]]);
+      }
       cartResult = await addItem(headers, sku);
     }
     const subtotal = Object.values(basePrices).reduce((sum, price) => sum + price, 0);
@@ -64,6 +78,7 @@ async function main() {
     assert.equal(cartResult.items.length, 22);
     for (const item of cartResult.items) {
       assert.equal(item.basePrice, basePrices[item.sku], item.sku);
+      if (approvedPhotos[item.sku]) assert.equal(item.heroImageUrl, approvedPhotos[item.sku]);
       assert.equal(item.unitPrice, seasonalPrice, item.sku);
       assert.equal(item.isPromoApplied, true, item.sku);
     }
@@ -95,7 +110,7 @@ async function main() {
       const replay = await checkout(cart, headers, 200, phone, phone, key);
       assert.equal(replay.order.id, order.order.id);
     }
-    console.log("PASS 22 SKU listing, detail, cart and order prices, promotion savings, tamper resistance and checkout phone formats");
+    console.log("PASS six approved photographs and 22 SKU listing, detail, cart and order prices, promotion savings, tamper resistance and checkout phone formats");
 
     // Simulate prices and categories for which the active offer does not apply.
     await query("INSERT INTO product_categories (id, name) VALUES ('fixture-non-offer', 'Fixture non-offer')");

@@ -22,6 +22,7 @@
 
 process.env.NODE_ENV = "test";
 
+const { openDate } = require("./bookingTestDates");
 const assert = require("assert");
 const crypto = require("crypto");
 const http = require("http");
@@ -287,9 +288,7 @@ async function runStagingSmokeTests() {
 
     let createdBooking;
     await it("Creates at-home salon appointment request in REQUESTED status", async () => {
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 2);
-      const slotDate = tomorrow.toISOString().split("T")[0];
+      const slotDate = openDate();
 
       const addonRes = await query("SELECT id FROM service_addons WHERE service_id = 'gel_extensions' LIMIT 1;");
       const addonId = addonRes.rows[0].id;
@@ -398,8 +397,8 @@ async function runStagingSmokeTests() {
     console.log("\n▶ [Test 8] Appointment Confirmation Controls");
 
     await it("Admin can confirm appointment request, locking schedule window", async () => {
-      const startTime = new Date(Date.now() + 2 * 24 * 3600 * 1000).toISOString();
-      const endTime = new Date(Date.now() + (2 * 24 + 2) * 3600 * 1000).toISOString();
+      const startTime = openDate() + "T12:30:00+05:30";
+      const endTime = openDate() + "T14:30:00+05:30";
 
       const res = await request(`/api/admin/bookings/${createdBooking.id}/confirm`, {
         method: "PATCH",

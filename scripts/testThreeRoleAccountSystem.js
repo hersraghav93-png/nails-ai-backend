@@ -35,6 +35,7 @@
 
 process.env.NODE_ENV = "test";
 
+const { openDate } = require("./bookingTestDates");
 const assert = require("assert");
 const http = require("http");
 const express = require("express");
@@ -244,8 +245,8 @@ async function run() {
         headers: { Authorization: `Bearer ${customerB.token}` },
         body: {
           service_id: serviceId,
-          requested_date: "2026-11-25",
-          requested_time_slot: "14:00 - 16:00",
+          requested_date: openDate(),
+          requested_time_slot: "12:30 PM - 02:30 PM",
           customer: {
             name: "Pooja Verma",
             phone: customerB.phone

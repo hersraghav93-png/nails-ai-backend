@@ -16,6 +16,7 @@
 
 "use strict";
 
+const { openDate } = require("./bookingTestDates");
 const { query } = require("../src/db/pool");
 const { getOrCreateCart, addItemToCart, getCartDetails, clearCart, claimGuestCart } = require("../src/services/cartService");
 const { createOrderFromCart, getOrderById, getCustomerOrders } = require("../src/services/orderService");
@@ -229,7 +230,7 @@ async function runTests() {
         state: "Haryana",
         postal_code: "122018",
       },
-      requestedDate: "2026-11-28",
+      requestedDate: openDate(),
       requestedTimeSlot: "03:00 PM - 05:00 PM",
       customerNotes: "Bridal event consultation",
     });

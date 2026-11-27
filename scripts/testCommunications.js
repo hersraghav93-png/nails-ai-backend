@@ -17,6 +17,7 @@
 "use strict";
 
 require("dotenv").config();
+const { openDate } = require("./bookingTestDates");
 const assert = require("assert");
 const { getPool, query } = require("../src/db/pool");
 const { getCorsOriginValidator, ALLOWED_PROD_ORIGINS, ALLOWED_STAGING_ORIGINS } = require("../src/middleware/corsConfig");
@@ -224,6 +225,7 @@ async function runCommunicationsSuite() {
     });
     assert(reqRendered.text.includes("NBD-BKG-88"));
     assert(reqRendered.text.includes("Gel Extensions"));
+    assert(reqRendered.text.includes("14:00 - 16:00 IST"));
 
     const altRendered = renderTemplate("APPOINTMENT_ALTERNATIVE_PROPOSED", {
       customerName: "Kavita Rao",
@@ -232,8 +234,14 @@ async function runCommunicationsSuite() {
       proposedSlot: "11:00 - 13:00",
       rescheduleReason: "Studio capacity reached on requested date",
     });
-    assert(altRendered.text.includes("2026-11-21 (11:00 - 13:00)"));
+    assert(altRendered.text.includes("2026-11-21 (11:00 - 13:00 IST)"));
     assert(altRendered.text.includes("Studio capacity reached"));
+
+    const exceptionConfirmed = renderTemplate("APPOINTMENT_CONFIRMED", {
+      confirmedDate: "2026-11-21", confirmedSlot: "11:00 - 13:00", scheduleException: true,
+    });
+    assert(exceptionConfirmed.text.includes("11:00 - 13:00 IST"));
+    assert(exceptionConfirmed.text.includes("staff-approved schedule exception"));
   });
 
   // ===========================================================================
@@ -402,7 +410,7 @@ async function runCommunicationsSuite() {
     assert(svcRes.rows.length > 0, "Must have active service");
     const serviceId = svcRes.rows[0].id;
 
-    const futureDate = new Date(Date.now() + 4 * 24 * 3600 * 1000).toISOString().split("T")[0];
+    const futureDate = openDate(4);
 
     const bookingResult = await createAppointmentRequest({
       customer: {
@@ -412,7 +420,7 @@ async function runCommunicationsSuite() {
       },
       serviceId,
       requestedDate: futureDate,
-      requestedTimeSlot: "11:00 - 13:00",
+      requestedTimeSlot: "12:30 PM - 02:30 PM",
       serviceAddress: {
         addressLine1: "Flat 402, Lotus Boulevard",
         city: "Noida",
@@ -434,14 +442,14 @@ async function runCommunicationsSuite() {
   });
 
   await itAsync("Proposes alternative slot and automatically queues APPOINTMENT_ALTERNATIVE_PROPOSED", async () => {
-    const altDate = new Date(Date.now() + 5 * 24 * 3600 * 1000).toISOString().split("T")[0];
+    const altDate = openDate(5);
     const mockAdmin = { id: (await query(`SELECT id FROM users LIMIT 1;`)).rows[0].id, roles: ["artist_divya"] };
 
     const proposed = await proposeAlternativeSlot(
       testBookingId,
       {
         alternativeDate: altDate,
-        alternativeTimeSlot: "15:00 - 17:00",
+        alternativeTimeSlot: "03:00 PM - 05:00 PM",
         rescheduleReason: "Divya is engaged at another south Delhi client in the morning.",
       },
       mockAdmin,
@@ -461,9 +469,8 @@ async function runCommunicationsSuite() {
   await itAsync("Confirms appointment request and automatically queues APPOINTMENT_CONFIRMED", async () => {
     const mockAdmin = { id: (await query(`SELECT id FROM users LIMIT 1;`)).rows[0].id, roles: ["artist_divya"] };
 
-    const startTime = new Date(Date.now() + 5 * 24 * 3600 * 1000);
-    startTime.setHours(15, 0, 0, 0);
-    const endTime = new Date(startTime.getTime() + 2 * 3600 * 1000);
+    const startTime = new Date(openDate(5) + "T15:00:00+05:30");
+    const endTime = new Date(openDate(5) + "T17:00:00+05:30");
 
     const confirmed = await confirmAppointmentRequest(
       testBookingId,

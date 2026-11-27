@@ -15,6 +15,8 @@ const express = require("express");
 const { query } = require("../db/pool");
 const { calculateItemPricing } = require("../services/pricingEngine");
 
+const { getApprovedDesign } = require("../services/catalogueDesigns");
+
 const router = express.Router();
 
 /**
@@ -106,6 +108,7 @@ router.get("/", async (req, res) => {
 
     const products = productsRes.rows.map((p) => {
       const pricing = calculateItemPricing(p, 1);
+      const design = getApprovedDesign(p.sku);
       return {
         id: p.id,
         sku: p.sku,
@@ -113,7 +116,7 @@ router.get("/", async (req, res) => {
         slug: p.slug,
         categoryId: p.category_id,
         categoryName: p.category_name,
-        description: p.description,
+        description: design?.description || p.description,
         craftsmanshipDetails: p.craftsmanship_details,
         basePrice: pricing.basePrice,
         effectivePrice: pricing.unitPrice,
@@ -121,7 +124,7 @@ router.get("/", async (req, res) => {
         promoName: pricing.promoName,
         isAvailable: p.is_available,
         isMadeToOrder: p.is_made_to_order,
-        primaryImageUrl: p.primary_image_url,
+        primaryImageUrl: design?.imageUrl || p.primary_image_url,
         variants: variantsByProduct[p.id] || [],
       };
     });
@@ -204,6 +207,7 @@ router.get("/:sku", async (req, res) => {
     );
 
     const pricing = calculateItemPricing(product, 1);
+    const design = getApprovedDesign(product.sku);
 
     return res.json({
       status: "success",
@@ -214,7 +218,7 @@ router.get("/:sku", async (req, res) => {
         slug: product.slug,
         categoryId: product.category_id,
         categoryName: product.category_name,
-        description: product.description,
+        description: design?.description || product.description,
         craftsmanshipDetails: product.craftsmanship_details,
         basePrice: pricing.basePrice,
         effectivePrice: pricing.unitPrice,
@@ -222,7 +226,13 @@ router.get("/:sku", async (req, res) => {
         promoName: pricing.promoName,
         isAvailable: product.is_available,
         isMadeToOrder: product.is_made_to_order,
-        images: imagesRes.rows.map((img) => ({
+        images: design ? [{
+          id: imagesRes.rows.find((img) => img.is_hero)?.id || imagesRes.rows[0]?.id || null,
+          imageUrl: design.imageUrl,
+          altText: product.name + " nail design",
+          isHero: true,
+          displayOrder: 0,
+        }] : imagesRes.rows.map((img) => ({
           id: img.id,
           imageUrl: img.image_url,
           altText: img.alt_text,

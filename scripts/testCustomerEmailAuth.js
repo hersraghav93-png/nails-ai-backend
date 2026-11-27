@@ -22,6 +22,7 @@
 
 process.env.NODE_ENV = "test";
 
+const { openDate } = require("./bookingTestDates");
 const assert = require("assert");
 const crypto = require("crypto");
 const http = require("http");
@@ -196,8 +197,8 @@ async function run() {
             state: "Haryana",
             postal_code: "122002",
           },
-          requested_date: "2026-12-15",
-          requested_time_slot: "Afternoon (12:00 PM - 3:00 PM)",
+          requested_date: openDate(),
+          requested_time_slot: "12:30 PM - 02:30 PM",
         }
       );
       assert.strictEqual(bkgRes.status, 201);

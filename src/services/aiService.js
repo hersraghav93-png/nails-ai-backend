@@ -7,6 +7,8 @@ const { buildKnowledgeDatabase } = require("../builder/knowledgeBuilder");
 const { query } = require("../db/pool");
 const { calculateItemPricing } = require("./pricingEngine");
 const { listAvailableServices } = require("./bookingService");
+const { getBookingSchedule } = require("./bookingSchedule");
+const { getApprovedDesign } = require("./catalogueDesigns");
 
 class DivvUnavailableError extends Error {
   constructor() {
@@ -27,7 +29,7 @@ async function loadLiveStudioFacts() {
       return {
         name: product.name,
         category: product.category_id,
-        description: product.description,
+        description: getApprovedDesign(product.sku)?.description || product.description,
         regularINR: price.basePrice,
         currentINR: price.unitPrice,
         offer: price.isPromoApplied ? price.promoName : null,
@@ -43,7 +45,7 @@ async function loadLiveStudioFacts() {
     currentINR: service.effectivePrice,
     customQuote: service.isCustomQuote,
   })) : null;
-  return JSON.stringify({ pressOnSets: designs, atHomeServices: appointments });
+  return JSON.stringify({ pressOnSets: designs, atHomeServices: appointments, appointmentSchedule: getBookingSchedule() });
 }
 
 /**
@@ -250,7 +252,8 @@ CRITICAL RULES FOR DIVV IDENTITY, ACCURACY, AND CONVERSATION STYLE:
 4. KEEP SERVICES DISTINCT: Press-ons ship across India and are applied at home by the customer. At-home appointments are a separate, in-person service in Delhi NCR. Use the live service names and starting prices. For a custom quote, hand off to Divya.
 5. OFFERS: Mention offers only when the corresponding live row shows a lower current price than its regular price. Summarise a shared press-on offer only for the eligible sets. Never invent coupons, loyalty discounts, bundles, free delivery, or a fixed travel fee.
 6. AT-HOME SALON SERVICE PROTOCOL (DELHI NCR):
-   - If asked how extensions differ from press-ons: customers apply press-ons themselves. Divya fits and sculpts gel extensions at the customer’s home in Delhi NCR. At-home hours are 12 PM – 6 PM.
+   - If asked how extensions differ from press-ons: customers apply press-ons themselves. Divya fits and sculpts gel extensions at the customer’s home in Delhi NCR.
+   - Use the live appointmentSchedule for hours, open weekdays, request windows and notice. openWeekdays uses 0 for Sunday through 6 for Saturday. Interpret calendar dates and times in Asia/Kolkata. Any exception must be proposed by staff and accepted by the customer. Use the live product descriptions over older retrieved copy. Do not infer colours or finishes from product names.
    - Divya brings all professional equipment: electric drills, LED lamps, single-use files, sterilized implements, and soft gel collections directly to the client's home.
    - Appointments must be requested on the website or via WhatsApp and are confirmed personally by Divya. Divv cannot directly confirm bookings or schedule appointments.
 7. PRESS-ON NAIL SIZING & CUSTOMIZATION:
