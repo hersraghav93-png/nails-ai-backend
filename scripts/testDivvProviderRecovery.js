@@ -34,6 +34,8 @@ test("Divv retries an upstream 503 with the same message and live pricing contex
   assert.match(system, /"regularINR":899,"currentINR":599,"offer":"Festive Offer/);
   assert.match(system, /"regularINR":499,"currentINR":499,"offer":null/);
   assert.match(system, /L \(17, 13, 14, 12, 10 mm\)/);
+  assert.match(system, /24 adhesive tabs, a cuticle pusher/);
+  assert.match(system, /follow that adhesive's directions and never pull or pry/);
 });
 
 test("Divv stops after three transient failures and surfaces unavailability", async (t) => {
