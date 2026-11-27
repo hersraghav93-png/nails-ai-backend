@@ -1,6 +1,6 @@
 const express = require("express");
 const CONFIG = require("../config");
-const { generateChatReply, reloadKnowledge, getKnowledgeStatus } = require("../services/aiService");
+const { DivvUnavailableError, generateChatReply, reloadKnowledge, getKnowledgeStatus } = require("../services/aiService");
 const { buildKnowledgeDatabase } = require("../builder/knowledgeBuilder");
 const { checkHealth } = require("../db/pool");
 const { isFirebaseAdminConfigured } = require("../services/firebaseService");
@@ -114,7 +114,7 @@ router.post("/chat", async (req, res) => {
   try {
     const { message, productContext, history } = req.body;
 
-    if (!message || typeof message !== "string") {
+    if (typeof message !== "string" || !message.trim()) {
       return res.status(400).json({
         error: "Invalid request payload. 'message' string is required."
       });
@@ -127,7 +127,10 @@ router.post("/chat", async (req, res) => {
 
     res.json({ reply });
   } catch (err) {
-    console.error("❌ [Chat Route Error]:", err.message || err);
+    if (err instanceof DivvUnavailableError) {
+      return res.status(503).json({ error: "Divv is temporarily unavailable. Please try again." });
+    }
+    console.error("[Chat Route Error]", err.name);
     res.status(500).json({
       error: "Something went wrong processing your request. Please try again or click Chat with the Artist directly."
     });
