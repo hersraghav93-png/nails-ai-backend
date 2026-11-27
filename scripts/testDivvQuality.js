@@ -4,8 +4,8 @@
  * Nails by Divya Platform — Phase 4E.1
  *
  * Verifies:
- * 1. Service pricing against canonical catalogue (Extensions ₹1499/₹999, Overlay ₹1299/₹999, Power Polish ₹1199/₹999, 3D Art custom quote, Removal enquiry).
- * 2. Active promotion auditing (₹599 press-ons, ₹999 services; no unverified 15% loyalty, no fake coupons, no free delivery).
+ * 1. Service pricing against canonical catalogue (Extensions ₹1499/₹999, Overlay ₹1299/₹999, Power Polish ₹1199/₹499, 3D Art custom quote, Removal enquiry).
+ * 2. Active promotion auditing (₹599 press-ons, services from ₹499; no unverified 15% loyalty, no fake coupons, no free delivery).
  * 3. Delivery policies (location-based, no free shipping claims, Pan-India vs Delhi NCR).
  * 4. At-home appointment protocol in Delhi NCR (equipment, hours, pending confirmation).
  * 5. Press-on sizing & customization (XS-L, custom mm sizing, shapes).
@@ -89,10 +89,10 @@ it("retrieves canonical pricing for Natural Nail Overlay (₹1,299 base / ₹999
   assert.ok(context.selectedKnowledgeXml.includes("Overlay"), "Context must contain Overlay");
 });
 
-it("retrieves canonical pricing for Power Polish (₹1,199 base / ₹999 promotional)", () => {
+it("retrieves canonical pricing for Power Polish (₹1,199 base / ₹499 promotional)", () => {
   const context = retrieveRelevantContext("Tell me about power polish and how much it costs");
   assert.ok(context.selectedKnowledgeXml.includes("1,199") || context.selectedKnowledgeXml.includes("1199"), "Context must contain base price ₹1,199");
-  assert.ok(context.selectedKnowledgeXml.includes("999"), "Context must contain promotional price ₹999");
+  assert.match(context.selectedKnowledgeXml, /Power Polish(?: \/ Shellac)?: Base price ₹1,199 \| (?:Active promotional|Promotional) offer: ₹499/);
 });
 
 it("confirms 3D Custom Artistry requires custom quotation (no fixed price)", () => {
