@@ -6,7 +6,7 @@
  * Verifies:
  * 1. gel_extensions: basePrice 1499, promotionalPrice 999, effectivePrice 999, pricingDisplay "From ₹999"
  * 2. natural_overlay: basePrice 1299, promotionalPrice 999, effectivePrice 999, pricingDisplay "From ₹999"
- * 3. power_polish: basePrice 1199, promotionalPrice 999, effectivePrice 999, pricingDisplay "From ₹999", sanitized description without "Russian"
+ * 3. power_polish: basePrice 1199, promotionalPrice 499, effectivePrice 499, pricingDisplay "From ₹499", sanitized description without "Russian"
  * 4. custom_3d_art: basePrice null, promotionalPrice null, effectivePrice null, isCustomQuote true, pricingDisplay "Custom Quote"
  * 5. extension_removal: basePrice null, promotionalPrice null, effectivePrice null, isCustomQuote true, pricingDisplay "Custom Quote"
  * 6. Individual service endpoints (/api/services/:serviceId) preserve the exact same fields
@@ -125,7 +125,7 @@ async function runTests() {
 
       // power_polish
       assert.strictEqual(parseFloat(byId.power_polish.base_price), 1199.0);
-      assert.strictEqual(parseFloat(byId.power_polish.promotional_price), 999.0);
+      assert.strictEqual(parseFloat(byId.power_polish.promotional_price), 499.0);
       assert.strictEqual(
         byId.power_polish.description,
         "A polished, high-gloss gel manicure service on natural nails for clients seeking long-lasting vibrant colour without tip extensions."
@@ -181,14 +181,14 @@ async function runTests() {
       assert.ok(svc.addons.length >= 1, "Has active add-on");
     });
 
-    await itAsync("power_polish: basePrice 1199, promotionalPrice 999, effectivePrice 999, display 'From ₹999', sanitized description", () => {
+    await itAsync("power_polish: basePrice 1199, promotionalPrice 499, effectivePrice 499, display 'From ₹499', sanitized description", () => {
       const svc = services.find((s) => s.id === "power_polish");
       assert.ok(svc, "power_polish exists");
       assert.strictEqual(svc.basePrice, 1199);
-      assert.strictEqual(svc.promotionalPrice, 999);
-      assert.strictEqual(svc.effectivePrice, 999);
+      assert.strictEqual(svc.promotionalPrice, 499);
+      assert.strictEqual(svc.effectivePrice, 499);
       assert.strictEqual(svc.isCustomQuote, false);
-      assert.strictEqual(svc.pricingDisplay, "From ₹999");
+      assert.strictEqual(svc.pricingDisplay, "From ₹499");
       assert.strictEqual(svc.estimatedDurationMinutes, 60);
       assert.strictEqual(
         svc.description,
@@ -246,9 +246,9 @@ async function runTests() {
       const res = await makeRequest("/api/services/power_polish");
       assert.strictEqual(res.status, 200);
       assert.strictEqual(res.body.service.basePrice, 1199);
-      assert.strictEqual(res.body.service.promotionalPrice, 999);
-      assert.strictEqual(res.body.service.effectivePrice, 999);
-      assert.strictEqual(res.body.service.pricingDisplay, "From ₹999");
+      assert.strictEqual(res.body.service.promotionalPrice, 499);
+      assert.strictEqual(res.body.service.effectivePrice, 499);
+      assert.strictEqual(res.body.service.pricingDisplay, "From ₹499");
       assert.strictEqual(
         res.body.service.description,
         "A polished, high-gloss gel manicure service on natural nails for clients seeking long-lasting vibrant colour without tip extensions."

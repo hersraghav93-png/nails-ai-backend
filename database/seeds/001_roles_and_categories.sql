@@ -79,7 +79,7 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO services (id, name, base_price, promotional_price, estimated_duration_minutes, description, is_active) VALUES
 ('gel_extensions', 'Bespoke Gel Extensions', 1499.00, 999.00, 120, 'Sculpted tips using professional soft gel or polygel. Lightweight, durable, and tailored to custom length and shape.', TRUE),
 ('natural_overlay', 'Natural Nail Overlay & Strengthening', 1299.00, 999.00, 90, 'Structured gel layer applied directly over natural nails to add strength, prevent breaking, and provide a flawless chip-free canvas.', TRUE),
-('power_polish', 'Signature Manicure & Power Polish', 1199.00, 999.00, 60, 'A polished, high-gloss gel manicure service on natural nails for clients seeking long-lasting vibrant colour without tip extensions.', TRUE),
+('power_polish', 'Signature Manicure & Power Polish', 1199.00, 499.00, 60, 'A polished, high-gloss gel manicure service on natural nails for clients seeking long-lasting vibrant colour without tip extensions.', TRUE),
 ('custom_3d_art', '3D, Chrome & Custom Artistry', NULL, NULL, 60, 'Custom hand-painted floral motifs, glazed chrome aura effects, French ombré fades, or 3D textured accents tailored to your outfit.', TRUE),
 ('extension_removal', 'Nail Extension Removal', NULL, NULL, 45, 'Gentle, damage-free professional soak-off and conditioning removal for existing sets.', TRUE)
 ON CONFLICT (id) DO UPDATE SET

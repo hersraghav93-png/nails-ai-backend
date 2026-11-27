@@ -110,7 +110,7 @@ ${diwaliHeading}
 ${diwaliSubtext}
 
 Confirmed Active Diwali Offers:
-1. Home Service from ₹999 (Delhi NCR: Delhi, Gurgaon, Noida)
+1. Home Service from ₹499 (Delhi NCR: Delhi, Gurgaon, Noida)
 2. Press-on Nails from ₹599 (Pan-India delivery across India)
 3. Buy 2 Press-On Sets, Get 1 Set FREE (3rd set is complimentary ❤️)
 4. First Order: 10% OFF (welcome discount for first-time clients)
@@ -134,9 +134,9 @@ Important Terms Note: All 6 offers are confirmed active as displayed on the webs
         let conditions = "Confirmed active Diwali offer on website. Expiry date is unspecified. Stacking with other discounts is unspecified.";
 
         if (cardTitle.includes("Home Service")) {
-          offerSlug = "home-service-999";
+          offerSlug = "home-service-499";
           offerType = "Home Service (At-Home Appointments in Delhi NCR)";
-          regularVsPromo = "Promotional price starts at ₹999 for at-home appointments in Delhi, Gurgaon, and Noida. Regular pricing varies depending on the specific nail service or extension set selected.";
+          regularVsPromo = "Promotional price starts at ₹499 for at-home appointments in Delhi, Gurgaon, and Noida. Regular pricing varies depending on the specific nail service or extension set selected.";
         } else if (cardTitle.includes("Press-on") && cardTitle.includes("599")) {
           offerSlug = "press-on-from-599";
           offerType = "Handmade Press-On Nails (Pan-India Delivery)";
@@ -291,7 +291,7 @@ Internal SKU: ${sku} (NOTE: For internal lookup only. Never mention SKU "${sku}"
         section: "shop-overview",
         title: shopHeading,
         category: "Products & Press-On Pricing",
-        content: `Nails by Divya Press-On Collections: ${shopIntro}\nEvery set is custom hand-painted after your order is confirmed using professional soft gel. Regular prices range from ₹699 to ₹1399 across 22 catalog designs. Active Diwali offers include Press-on Nails starting from ₹599 and Buy 2 Get 1 Free. Order directly via WhatsApp.`,
+        content: `Nails by Divya Press-On Collections: ${shopIntro}\nEvery set is custom hand-painted after your order is confirmed using professional soft gel. Regular prices range from ₹699 to ₹1399 across the catalog. Active Diwali offers include Press-on Nails starting from ₹599 and Buy 2 Get 1 Free. Order directly via WhatsApp.`,
         keywords: extractKeywords(shopHeading, shopIntro, "collection", "pricing", "press-on", "regular price")
       });
       return; // Handled `#shop` via detailed product extraction

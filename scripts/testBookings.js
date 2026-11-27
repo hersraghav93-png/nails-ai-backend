@@ -222,14 +222,14 @@ async function runBookingTestSuite() {
       assert.strictEqual(naturalOverlay.isCustomQuote, false);
       assert.strictEqual(naturalOverlay.pricingDisplay, "From ₹999");
 
-      // 3. Power Polish: Base ₹1199, Promo ₹999, Sanitize description
+      // 3. Power Polish: Base ₹1199, Promo ₹499, Sanitize description
       const powerPolish = res.body.services.find((s) => s.id === "power_polish");
       assert.ok(powerPolish);
       assert.strictEqual(powerPolish.basePrice, 1199.0);
-      assert.strictEqual(powerPolish.promotionalPrice, 999.0);
-      assert.strictEqual(powerPolish.effectivePrice, 999.0);
+      assert.strictEqual(powerPolish.promotionalPrice, 499.0);
+      assert.strictEqual(powerPolish.effectivePrice, 499.0);
       assert.strictEqual(powerPolish.isCustomQuote, false);
-      assert.strictEqual(powerPolish.pricingDisplay, "From ₹999");
+      assert.strictEqual(powerPolish.pricingDisplay, "From ₹499");
       assert.strictEqual(
         powerPolish.description,
         "A polished, high-gloss gel manicure service on natural nails for clients seeking long-lasting vibrant colour without tip extensions."

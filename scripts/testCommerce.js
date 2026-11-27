@@ -216,7 +216,7 @@ async function runCommerceTestSuite() {
         method: "POST",
         headers: { "X-Cart-Session": guestSessionToken },
         body: {
-          sku: "CAS-004", // Molten Chrome Ripple (Base: 899, Promo: 599)
+          sku: "CAS-007", // Celestial Opal 3D (Base: 1199, Promo: 599)
           shape: "Almond",
           length: "Medium",
           sizing_preset: "M",
@@ -227,7 +227,7 @@ async function runCommerceTestSuite() {
       assert.strictEqual(res.status, 201);
       assert.strictEqual(res.body.status, "success");
       assert.strictEqual(res.body.items.length, 1);
-      assert.strictEqual(res.body.items[0].sku, "CAS-004");
+      assert.strictEqual(res.body.items[0].sku, "CAS-007");
       assert.strictEqual(res.body.items[0].quantity, 2);
       assert.strictEqual(res.body.items[0].shape, "Almond");
       assert.strictEqual(res.body.items[0].length, "Medium");
@@ -320,7 +320,7 @@ async function runCommerceTestSuite() {
       const resZero = await makeRequest("/api/cart/items", {
         method: "POST",
         headers: { "X-Cart-Session": guestSessionToken },
-        body: { sku: "CAS-004", shape: "Almond", length: "Medium", quantity: 0 },
+        body: { sku: "CAS-007", shape: "Almond", length: "Medium", quantity: 0 },
       });
       assert.strictEqual(resZero.status, 400);
       assert.strictEqual(resZero.body.code, "INVALID_QUANTITY");
@@ -328,7 +328,7 @@ async function runCommerceTestSuite() {
       const resNegative = await makeRequest("/api/cart/items", {
         method: "POST",
         headers: { "X-Cart-Session": guestSessionToken },
-        body: { sku: "CAS-004", shape: "Almond", length: "Medium", quantity: -2 },
+        body: { sku: "CAS-007", shape: "Almond", length: "Medium", quantity: -2 },
       });
       assert.strictEqual(resNegative.status, 400);
       assert.strictEqual(resNegative.body.code, "INVALID_QUANTITY");
@@ -336,7 +336,7 @@ async function runCommerceTestSuite() {
       const resExcess = await makeRequest("/api/cart/items", {
         method: "POST",
         headers: { "X-Cart-Session": guestSessionToken },
-        body: { sku: "CAS-004", shape: "Almond", length: "Medium", quantity: 99 },
+        body: { sku: "CAS-007", shape: "Almond", length: "Medium", quantity: 99 },
       });
       assert.strictEqual(resExcess.status, 400);
       assert.strictEqual(resExcess.body.code, "EXCEEDS_MAX_QUANTITY");
@@ -346,7 +346,7 @@ async function runCommerceTestSuite() {
       const res = await makeRequest("/api/cart/items", {
         method: "POST",
         headers: { "X-Cart-Session": guestSessionToken },
-        body: { sku: "CAS-004", shape: "Triangle-Unverified", length: "Medium", quantity: 1 },
+        body: { sku: "CAS-007", shape: "Triangle-Unverified", length: "Medium", quantity: 1 },
       });
       assert.strictEqual(res.status, 400);
       assert.strictEqual(res.body.code, "INVALID_SHAPE");
@@ -356,7 +356,7 @@ async function runCommerceTestSuite() {
       const res = await makeRequest("/api/cart/items", {
         method: "POST",
         headers: { "X-Cart-Session": guestSessionToken },
-        body: { sku: "CAS-004", shape: "Almond", length: "Micro-Mini", quantity: 1 },
+        body: { sku: "CAS-007", shape: "Almond", length: "Micro-Mini", quantity: 1 },
       });
       assert.strictEqual(res.status, 400);
       assert.strictEqual(res.body.code, "INVALID_LENGTH");
@@ -401,7 +401,7 @@ async function runCommerceTestSuite() {
         method: "POST",
         headers: { "X-Cart-Session": guestSessionToken },
         body: {
-          sku: "CAS-004", // Base price in DB: 899.00
+          sku: "CAS-007", // Base price in DB: 1199.00
           shape: "Almond",
           length: "Medium",
           quantity: 1,
@@ -412,10 +412,10 @@ async function runCommerceTestSuite() {
       });
 
       assert.strictEqual(res.status, 201);
-      const item = res.body.items.find((i) => i.sku === "CAS-004");
+      const item = res.body.items.find((i) => i.sku === "CAS-007");
       // Under Festive Offer: promo price is ₹599.00 (not ₹1.00)
       assert.strictEqual(item.unitPrice, 599.0);
-      assert.strictEqual(item.basePrice, 899.0);
+      assert.strictEqual(item.basePrice, 1199.0);
       assert.strictEqual(item.basePrice - item.unitPrice, 300.0);
       assert.strictEqual(item.isPromoApplied, true);
     });
@@ -558,7 +558,7 @@ async function runCommerceTestSuite() {
       await makeRequest("/api/cart/items", {
         method: "POST",
         headers: { "X-Cart-Session": idemSessionToken },
-        body: { sku: "CAS-004", shape: "Almond", length: "Short", quantity: 1 },
+        body: { sku: "CAS-007", shape: "Almond", length: "Short", quantity: 1 },
       });
 
       const testIdempotencyKey = `idem-test-key-${ts}`;

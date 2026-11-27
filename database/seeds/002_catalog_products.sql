@@ -99,6 +99,10 @@ INSERT INTO products (sku, name, slug, category_id, base_price, description, cra
  'Custom hand-crafted with salon-grade soft gel, tailored to custom nail sizing. Complete 10-piece set with full prep kit.', TRUE, TRUE)
 ON CONFLICT (sku) DO NOTHING;
 
+-- Keep retired designs available to order history only.
+UPDATE products SET is_archived = TRUE, is_available = FALSE
+WHERE sku IN ('CAS-004', 'PAR-009');
+
 -- Attach Hero Images to Products
 INSERT INTO product_images (product_id, image_url, alt_text, is_hero, display_order)
 SELECT id, 'assets/products/wedding/WED-005/herowedd5.png', 'Rosewood Bloom handmade press-on nail set', TRUE, 0 FROM products WHERE sku = 'WED-005'

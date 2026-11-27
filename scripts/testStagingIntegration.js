@@ -193,10 +193,10 @@ async function runStagingSmokeTests() {
     // --------------------------------------------------------------------------
     console.log("\n▶ [Test 2] Product Catalogue & Pricing Verification");
 
-    await it("GET /api/products returns all 22 active handcrafted press-on nail sets", async () => {
+    await it("GET /api/products returns all 20 active handcrafted press-on nail sets", async () => {
       const res = await request("/api/products");
       assert.strictEqual(res.status, 200);
-      assert.strictEqual(res.body.total, 22, `Expected 22 products, got ${res.body.total}`);
+      assert.strictEqual(res.body.total, 20, `Expected 20 products, got ${res.body.total}`);
       assert(Array.isArray(res.body.products));
 
       // Verify festive offer

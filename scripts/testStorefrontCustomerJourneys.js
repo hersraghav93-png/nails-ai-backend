@@ -5,7 +5,7 @@
  * Nails by Divya Platform — Phase 3B Storefront & Commerce Integration
  *
  * Verifies end-to-end customer shopping, cart, checkout, booking, and account journeys:
- * - Test 1: Public Catalog & Sizing Verification (22 sets, ₹599 festive offer)
+ * - Test 1: Public Catalog & Sizing Verification (20 sets, ₹599 festive offer)
  * - Test 2: Guest Cart, Server Pricing & Guest Checkout (PENDING status & claim secret)
  * - Test 3: Authenticated Customer Cart Merging, Checkout & Order History Isolation
  * - Test 4: At-Home Appointment Request Lifecycle (REQUESTED status & NULL price preservation)
@@ -57,7 +57,7 @@ async function runTests() {
        ORDER BY p.created_at ASC;`
     );
 
-    assert(productsRes.rows.length === 22, `Found exactly 22 active handcrafted press-on sets (got ${productsRes.rows.length})`);
+    assert(productsRes.rows.length === 20, `Found exactly 20 active handcrafted press-on sets (got ${productsRes.rows.length})`);
 
     const sampleSet = productsRes.rows.find((p) => p.sku === "WED-005") || productsRes.rows[0];
     const pricing = calculateItemPricing(sampleSet, 1);
@@ -150,10 +150,10 @@ async function runTests() {
     const testUser = userRes.rows[0];
     assert(Boolean(testUser), `Found active test customer in database (${testUser.id})`);
 
-    // 1. Create a guest cart with item CAS-004
+    // 1. Create a guest cart with item CAS-007
     const tempGuestCart = await getOrCreateCart(null, null);
     await addItemToCart(tempGuestCart.id, {
-      sku: "CAS-004",
+      sku: "CAS-007",
       shape: "Oval",
       length: "Short",
       sizing_preset: "S",

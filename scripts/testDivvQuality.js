@@ -4,13 +4,13 @@
  * Nails by Divya Platform — Phase 4E.1
  *
  * Verifies:
- * 1. Service pricing against canonical catalogue (Extensions ₹1499/₹999, Overlay ₹1299/₹999, Power Polish ₹1199/₹999, 3D Art custom quote, Removal enquiry).
- * 2. Active promotion auditing (₹599 press-ons, ₹999 services; no unverified 15% loyalty, no fake coupons, no free delivery).
+ * 1. Service pricing against canonical catalogue (Extensions ₹1499/₹999, Overlay ₹1299/₹999, Power Polish ₹1199/₹499, 3D Art custom quote, Removal enquiry).
+ * 2. Active promotion auditing (₹599 press-ons, services from ₹499; no unverified 15% loyalty, no fake coupons, no free delivery).
  * 3. Delivery policies (location-based, no free shipping claims, Pan-India vs Delhi NCR).
  * 4. At-home appointment protocol in Delhi NCR (equipment, hours, pending confirmation).
  * 5. Press-on sizing & customization (XS-L, custom mm sizing, shapes).
  * 6. Order & payment boundaries (no fake booking confirmations, no fake payment status).
- * 7. Preservation of 137 knowledge sections and 22 catalog products.
+ * 7. Preservation of 135 knowledge sections and 20 catalog products.
  * ==============================================================================
  */
 
@@ -49,18 +49,18 @@ const db = loadKnowledgeDatabase();
 // ------------------------------------------------------------------------------
 console.log("\n🧪 1. Knowledge Base Structural Integrity & Catalogue Preservation");
 
-it("preserves exactly 137 verified knowledge sections", () => {
+it("preserves exactly 135 verified knowledge sections", () => {
   const status = getKnowledgeStatus();
   assert.strictEqual(status.isLoaded, true);
-  assert.strictEqual(status.sectionsCount, 137, `Expected 137 sections, got ${status.sectionsCount}`);
+  assert.strictEqual(status.sectionsCount, 135, `Expected 135 sections, got ${status.sectionsCount}`);
   assert.strictEqual(status.version, "2.0.0");
 });
 
-it("preserves exactly 22 active handcrafted press-on products", () => {
+it("preserves exactly 20 active handcrafted press-on products", () => {
   const products = db.sections.filter(
     (s) => s.category === "Products & Press-On Pricing" && s.id.startsWith("index.html#shop-") && s.productName
   );
-  assert.strictEqual(products.length, 22, `Expected 22 products, got ${products.length}`);
+  assert.strictEqual(products.length, 20, `Expected 20 products, got ${products.length}`);
 });
 
 it("preserves exactly 60 portfolio lookbook designs", () => {
@@ -89,10 +89,10 @@ it("retrieves canonical pricing for Natural Nail Overlay (₹1,299 base / ₹999
   assert.ok(context.selectedKnowledgeXml.includes("Overlay"), "Context must contain Overlay");
 });
 
-it("retrieves canonical pricing for Power Polish (₹1,199 base / ₹999 promotional)", () => {
+it("retrieves canonical pricing for Power Polish (₹1,199 base / ₹499 promotional)", () => {
   const context = retrieveRelevantContext("Tell me about power polish and how much it costs");
   assert.ok(context.selectedKnowledgeXml.includes("1,199") || context.selectedKnowledgeXml.includes("1199"), "Context must contain base price ₹1,199");
-  assert.ok(context.selectedKnowledgeXml.includes("999"), "Context must contain promotional price ₹999");
+  assert.ok(context.selectedKnowledgeXml.includes("499"), "Context must contain promotional price ₹499");
 });
 
 it("confirms 3D Custom Artistry requires custom quotation (no fixed price)", () => {
