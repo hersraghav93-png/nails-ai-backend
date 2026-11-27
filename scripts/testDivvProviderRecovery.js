@@ -9,6 +9,7 @@ require("../src/db/pool").query = async () => ({
   rows: [
     { sku: "TEST-1", name: "Offer Set", category_id: "casual", base_price: "899", is_available: true },
     { sku: "TEST-2", name: "Regular Set", category_id: "casual", base_price: "499", is_available: true },
+    { sku: "WED-007", name: "Champagne Aura", category_id: "wedding", base_price: "1299", is_available: true, description: "Outdated description" },
   ],
 });
 require("../src/services/bookingService").listAvailableServices = async () => [];
@@ -36,6 +37,10 @@ test("Divv retries an upstream 503 with the same message and live pricing contex
   assert.match(system, /L \(17, 13, 14, 12, 10 mm\)/);
   assert.match(system, /24 adhesive tabs, a cuticle pusher/);
   assert.match(system, /follow that adhesive's directions and never pull or pry/);
+  assert.match(system, /"appointmentSchedule":\{"timeZone":"Asia\/Kolkata","openWeekdays":\[2,3,4,5,6,0\],"opensAt":"12:00","closesAt":"18:00","minNoticeDays":2,"maxAdvanceDays":60/);
+  assert.match(system, /"name":"Champagne Aura","category":"wedding","description":"Pale blue and white/);
+  assert.match(system, /enter millimetre widths in the five sizing fields/);
+  assert.doesNotMatch(system, /Outdated description/);
 });
 
 test("Divv stops after three transient failures and surfaces unavailability", async (t) => {
