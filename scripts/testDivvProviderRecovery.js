@@ -24,7 +24,7 @@ test("Divv retries an upstream 503 with the same message and live pricing contex
     if (requests.length === 1) return Response.json({ error: { message: "busy" } }, { status: 503 });
     return Response.json({ candidates: [{ content: { parts: [{ text: "The Offer Set is ₹599." }] } }] });
   });
-  const reply = await generateChatReply("Does that set have an offer?", {
+  const reply = await generateChatReply("Do that set and Champagne Aura have an offer?", {
     history: [{ role: "user", content: "I am looking at the Offer Set." }],
   });
   assert.equal(reply, "The Offer Set is ₹599.");
@@ -41,6 +41,7 @@ test("Divv retries an upstream 503 with the same message and live pricing contex
   assert.match(system, /"name":"Champagne Aura","category":"wedding","description":"Pale blue and white/);
   assert.match(system, /enter millimetre widths in the five sizing fields/);
   assert.doesNotMatch(system, /Outdated description/);
+  assert.doesNotMatch(system, /Warm champagne chrome fade/);
 });
 
 test("Divv stops after three transient failures and surfaces unavailability", async (t) => {

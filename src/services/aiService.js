@@ -142,7 +142,8 @@ function retrieveRelevantContext(userQuery) {
     return { highlights: [], selectedKnowledgeXml: "<knowledge_base></knowledge_base>" };
   }
 
-  const sections = knowledgeCache.sections;
+  // The live catalogue is the sole source for the owner-approved replacements.
+  const sections = knowledgeCache.sections.filter((section) => !getApprovedDesign(section.sku));
   const scored = sections.map((sec) => ({
     section: sec,
     score: scoreSectionRelevance(sec, userQuery)
