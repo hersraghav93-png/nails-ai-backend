@@ -8,3 +8,6 @@ database/backups/*
 uploads/*
 !uploads/.gitkeep
 .neon
+
+# Local post-release verification outputs
+/.cleanup-verification/
