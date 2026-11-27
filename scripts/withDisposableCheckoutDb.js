@@ -15,6 +15,7 @@ const prefix = "nbd-checkout-test-";
 const suites = [
   "testMigrationApproval", "testBackend", "testCatalogCheckoutPricing", "testCheckoutOwnership", "testCommerce", "testStorefrontCustomerJourneys",
   "testCustomerEmailAuth", "testEmailLinkDelivery", "testPaymentVerification", "testBookings", "testCommunications",
+  "testAccountSwitchingAndSessionIsolation",
 ];
 
 function verifyFixture() {
