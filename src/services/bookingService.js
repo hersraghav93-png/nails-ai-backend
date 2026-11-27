@@ -1109,7 +1109,7 @@ async function proposeAlternativeSlot(bookingId, proposalData, adminUser, ipAddr
   }
   const storedReason = exception ? exceptionPrefix + reason : reason || "Divya is fully booked during the originally requested window.";
 
-  const validatedAltDate = validateRequestedDate(alternativeDate, { staff: true, exception });
+  const validatedAltDate = validateRequestedDate(alternativeDate, { staff: exception, exception });
   const validatedAltSlot = validateTimeSlot(alternativeTimeSlot, { exception });
 
   const pool = getPool();

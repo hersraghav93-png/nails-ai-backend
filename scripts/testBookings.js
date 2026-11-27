@@ -628,6 +628,10 @@ async function runBookingTestSuite() {
       });
       assert.equal((await propose("cust_a", { ...offer, allow_schedule_exception: true })).status, 403);
       assert.equal((await propose("admin", offer)).body.code, "INVALID_TIME_SLOT");
+      const delhiToday = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Kolkata" }).format(new Date());
+      assert.equal((await propose("admin", {
+        alternative_date: delhiToday, alternative_time_slot: "12:30 PM - 02:30 PM",
+      })).body.code, "MINIMUM_NOTICE_REQUIRED");
       assert.equal((await propose("admin", { ...offer, allow_schedule_exception: true })).body.code, "EXCEPTION_REASON_REQUIRED");
       const proposal = await propose("admin", { ...offer, allow_schedule_exception: true, reschedule_reason: "Fixture exception" });
       assert.equal(proposal.status, 200);
